@@ -1,0 +1,126 @@
+name: email-steward
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+kind: standalone
+description: Owner-private Gmail triage with durable obligations and shared Desktop rules
+license: MIT
+provides_tools: [email_steward]
+python_dependencies: ["fastapi>=0.133.1,<0.134"]
+requires_env:
+  - name: EMAIL_STEWARD_GOOGLE_CLIENT_ID
+  - name: EMAIL_STEWARD_GOOGLE_CLIENT_SECRET
+    secret: true
+oauth:
+  - id: gmail-1
+    authorize_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    client_id_env: EMAIL_STEWARD_GOOGLE_CLIENT_ID
+    client_secret_env: EMAIL_STEWARD_GOOGLE_CLIENT_SECRET
+    hosts: [gmail.googleapis.com]
+    authorize_params: {access_type: offline, prompt: consent}
+  - id: gmail-2
+    authorize_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    client_id_env: EMAIL_STEWARD_GOOGLE_CLIENT_ID
+    client_secret_env: EMAIL_STEWARD_GOOGLE_CLIENT_SECRET
+    hosts: [gmail.googleapis.com]
+    authorize_params: {access_type: offline, prompt: consent}
+  - id: gmail-3
+    authorize_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    client_id_env: EMAIL_STEWARD_GOOGLE_CLIENT_ID
+    client_secret_env: EMAIL_STEWARD_GOOGLE_CLIENT_SECRET
+    hosts: [gmail.googleapis.com]
+    authorize_params: {access_type: offline, prompt: consent}
+  - id: gmail-4
+    authorize_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    client_id_env: EMAIL_STEWARD_GOOGLE_CLIENT_ID
+    client_secret_env: EMAIL_STEWARD_GOOGLE_CLIENT_SECRET
+    hosts: [gmail.googleapis.com]
+    authorize_params: {access_type: offline, prompt: consent}
+config_schema:
+  platform:
+    type: str
+    default: "discord"
+  thread:
+    type: str
+    default: ""
+  parent:
+    type: str
+    default: ""
+  scope:
+    type: str
+    default: ""
+  account:
+    type: str
+    default: ""
+  transport_profile:
+    type: str
+    default: ""
+  transport_home:
+    type: str
+    default: ""
+  route_context:
+    type: str
+    default: "{}"
+  grant_revision:
+    type: int
+    default: 0
+  owner:
+    type: str
+    default: ""
+  destination:
+    type: str
+    default: ""
+  destination_type:
+    type: str
+    default: "dm"
+  private_confirmed:
+    type: bool
+    default: false
+  desktop_subject:
+    type: str
+    default: ""
+  desktop_session_user:
+    type: str
+    default: ""
+  desktop_session_provider:
+    type: str
+    default: ""
+  desktop_session_issuer:
+    type: str
+    default: ""
+  desktop_local_token:
+    type: bool
+    default: false
+  worker_enabled:
+    type: bool
+    default: false
+  poll_seconds:
+    type: int
+    default: 60
+  timezone:
+    type: str
+    default: ""
+    description: Optional IANA override; empty inherits the configured Hermes profile timezone. Scheduling requires a valid configured timezone.
+  briefs:
+    type: list
+    default: ["07:00", "11:00", "20:00"]
+  quiet_start:
+    type: str
+    default: ""
+  quiet_end:
+    type: str
+    default: ""
+  quiet_bypass:
+    type: list
+    default: ["danger", "security"]
+  important_contacts:
+    type: list
+    default: []

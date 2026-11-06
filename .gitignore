@@ -1,0 +1,20 @@
+.local/
+__pycache__/
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Never publish local authentication, model-agent state or mailbox data.
+.env
+.env.*
+.aws/
+.codex/
+.agents/
+*.pem
+*.key
+*.sqlite
+*.sqlite3
+*.db
+node_modules/
+.venv/
+venv/

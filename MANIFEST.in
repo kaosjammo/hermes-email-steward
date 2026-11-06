@@ -1,0 +1,11 @@
+include README.md plugin.yaml __init__.py requirements.lock
+recursive-include dashboard *.py *.json
+recursive-include desktop *.js *.json *.css
+recursive-include docs *.md
+include docs/FILE-INVENTORY.txt
+recursive-include scripts *.py *.sh
+recursive-include tests *.py *.js *.json *.mjs *.md
+prune .local
+prune .git
+prune __pycache__
+global-exclude *.pyc

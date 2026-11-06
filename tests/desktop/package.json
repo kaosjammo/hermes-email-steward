@@ -1,0 +1,19 @@
+{
+  "name": "email-steward-desktop-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12 <23 || >=24 <25"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.90.5",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "esbuild": "0.25.12",
+    "jsdom": "27.1.0",
+    "playwright-core": "1.56.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  }
+}

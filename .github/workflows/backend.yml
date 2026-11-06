@@ -1,0 +1,36 @@
+name: backend-local-contracts
+on:
+  push:
+    paths: ['email_steward/**', 'dashboard/**', 'tests/**', 'scripts/**', 'plugin.yaml', 'pyproject.toml', 'requirements.lock', '.github/workflows/backend.yml']
+  pull_request:
+    paths: ['email_steward/**', 'dashboard/**', 'tests/**', 'scripts/**', 'plugin.yaml', 'pyproject.toml', 'requirements.lock', '.github/workflows/backend.yml']
+permissions:
+  contents: read
+jobs:
+  synthetic-backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.14'
+      - name: Read-only reference SDK
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: NousResearch/hermes-agent
+          ref: b63eb8bf5a7a09e33b6d63077ec4e7df7361780b
+          path: .local/hermes-sdk
+          persist-credentials: false
+      - name: Native parser prerequisites
+        run: |
+          mkdir -p .local/tmp
+          export TMPDIR="$PWD/.local/tmp"
+          sudo apt-get update
+          sudo apt-get install -y libseccomp2 qpdf poppler-utils tesseract-ocr tesseract-ocr-eng
+      - run: scripts/setup.sh
+      - run: scripts/test.sh
+        env:
+          HERMES_UPSTREAM: ${{ github.workspace }}/.local/hermes-sdk
+      - name: Actual Hermes validation and discovery
+        run: TMPDIR="$PWD/.local/tmp" .local/backend/venv/bin/python scripts/validate_hermes.py --upstream .local/hermes-sdk
+      - run: scripts/package.sh
