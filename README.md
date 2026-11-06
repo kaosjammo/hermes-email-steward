@@ -154,3 +154,8 @@ The tested development SDK is commit `b63eb8bf5a7a09e33b6d63077ec4e7df7361780b`,
 The privacy-filtered public snapshot passed the real pinned-SDK plugin validation/discovery path: manifest, declared capabilities, security scanner, Desktop SDK surface and no-core-override checks passed. Validation emitted warnings for private/undocumented core imports, which remain unresolved compatibility risks. Four declared host-owned Gmail OAuth slots, native command/CLI registration and the REST router were discovered in isolated synthetic state; no live account was connected.
 
 The current aggregate Python test attempt **timed out after 240 seconds**, with failures and skips visible before termination; it is not a pass. The packaging command also failed: the prepared environment has setuptools83.0.0, outside the declared build range `>=80.9,<81`. Neither the declared build requirement nor failing assertions were weakened for publication. These unresolved results, unfinished UI approval and absent live acceptance make this a draft, not an install/release recommendation. Internal build history and original local source remain preserved separately; this public repository intentionally starts from a privacy-filtered snapshot.
+
+
+### Publication privacy correction
+
+An independent post-opening check found internal planning/approval provenance in the initial public technical addendum. The current source removes those identifiers, quoted approval provenance and private review paths, and describes the routing contract directly. The original public commit remains in Git history; this update does not claim historical erasure. No actual credential was identified by this finding.

@@ -1,59 +1,23 @@
-# Controller source correction and R03 clarification, 05/11/2026
+# Model routing and consent boundary
 
-This is a sourced correction to the generated specification, recorded during
-accepted repair cycle 1 (consumed 1 of 5, remaining 4). It does not erase the
-original requirements, frozen commits, independent findings or receipts.
+Email Steward runs rules first, then optionally uses the user's configured Hermes model. It does not require a separate AI service.
 
-The controller recovered the primary consolidated approved brief in session
-`20261105_164203_4eae4239`, anchored DB message **406273**, followed by Q31A and
-Mike's final approval in Discord **1567789836864200745**. Its exact model wording:
+## Host-owned routing
 
-> Use rules first, then the user’s configured Hermes model. No mandatory additional AI service.
+The implementation uses the supported configured-model API. Hermes owns routing and may try user-configured model/provider fallbacks. The plugin does not select another service, change global routing, request provider/model/profile override grants, monkeypatch the host or extend core. Explicit current operator/task restrictions on models and providers remain binding.
 
-The generated R03/prompt incorrectly strengthened that into an absolute
-pre-transmission/no-host-fallback requirement. The controller explicitly owns
-that specification error; the stronger wording was not Mike's instruction.
-The original text remains in REQUIREMENTS.md with this clarification linked.
+The tested public PluginContext/PluginLlm path can attempt a configured fallback after a primary failure, including an alternate endpoint whose public result does not expose a complete fallback marker. Primary failure without a configured fallback fails safely. The tested public call has no per-call no-fallback flag. This is not a guarantee that email content reached only one endpoint.
 
-The approved implementation uses the supported configured-model API. Hermes
-owns its existing routing and may try user-configured model/provider fallbacks.
-The plugin does not select another service, change global routing, request
-provider/model/profile override grants, monkeypatch the host or extend core.
-Explicit current user/task restrictions on models/providers remain binding.
+## Renewed consent
 
-Independent A-006 observations are valid: the real old public PluginContext /
-PluginLlm / auxiliary client can attempt a configured fallback after failure,
-including a same-model alternate endpoint whose default public result lacks a
-complete fallback marker. Primary failure with no configured fallback fails
-safely. At this pin the supported public call has no per-call no-fallback flag.
-The sealed addendum and raw probes remain read-only under
-`.local/reviews/initial-a/model-fallback/`.
+Before email content can be sent for model judgement, the owner must accept **model-routing-v2**. That disclosure covers host-managed fallbacks and incomplete endpoint/attempt visibility. Old **model-content-v1** approval is insufficient for a new model call. Missing or revoked consent causes zero new plugin model calls. Rules and bounded local extractive summaries remain model-free.
 
-A-006 is accepted as an **Important accuracy/consent defect**, rather than an
-authorisation to implement unsupported strict routing. The prior disclosure
-and failure message falsely promised no substitution/attempt. Before model
-content can flow again, the owner must accept **model-routing-v2**, which
-discloses host-managed fallbacks and incomplete endpoint/attempt visibility.
-Old **model-content-v1** approval is not sufficient
-for a new model call; revoked/missing consent also causes zero model calls.
-Rules and bounded local extractive brief content remain model-free.
+## Audit limits
 
-The adapter consumes only public result `provider`, `model` and `audit.task`,
-and labels them **SDK-reported metadata**. Durable reasons/inspection include
-that bounded information and explicitly say fallback status and physical
-endpoint/attempt history are unavailable. No inference that the reported
-provider/model proves a unique endpoint or no fallback is permitted. Public
-task slots require registration and can be separately operator-routed; this
-plugin retains the default main-model path rather than introducing another
-route or claiming task metadata supplies a complete attempt audit.
+The adapter consumes public result `provider`, `model` and `audit.task` fields and labels them **SDK-reported metadata**. Durable reasons and inspection show that bounded information while stating that fallback status and physical endpoint/attempt history are unavailable. Reported provider/model values do not prove a unique endpoint or absence of fallback.
 
-Failure leaves processing pending and reports that host-managed fallback may
-already have been attempted. Post-response metadata is not pre-transmission
-prevention. Strict host routing can be an optional future host capability; it
-is neither implemented nor a new blocker imposed on this build.
+Public task slots require registration and may be separately operator-routed. This plugin retains the default main-model path rather than inventing another route or claiming that task metadata supplies a complete attempt audit.
 
-The six original Important findings and Minor sdist omission remain unchanged;
-ES-B-001 duplicates A-002. A-006 is separately tracked within this same cycle.
-Fresh independent exact-successor closing reviews must judge this clarified
-primary contract and the preserved observations. Live model quality and all
-previously unrun provider/native/full-host gates remain UNRUN.
+Failure leaves processing pending and warns that host-managed fallback may already have been attempted. Post-response metadata is not pre-transmission prevention. A strict host routing control is not implemented here. Live model quality, physical routing and provider/native/full-host acceptance remain unverified.
+
+Internal approval/conversation identifiers and private review locations are intentionally not part of this public technical contract. An earlier public source commit contained planning provenance; this document corrects the current source without claiming that public Git history has been purged.

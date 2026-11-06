@@ -1,6 +1,6 @@
 # ES-002 requirements and acceptance addendum
 
-Approved 05/11/2026 by Mike's native-gateway expansion brief. This adds transport support to
+This document describes the supported native gateway boundaries; it does not establish live-delivery acceptance.
 ES-001; it does not replace its Gmail, obligation, extraction, privacy, Desktop or configured
 Hermes model contracts. Repair-3 predecessor and budget are recorded in
 [ES-002](https://github.com/kaosjammo/hermes-email-steward/issues/1). Original requirements/history remain intact.
