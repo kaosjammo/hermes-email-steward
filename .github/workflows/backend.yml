@@ -52,12 +52,17 @@ jobs:
         env:
           ES_PYTHON: ${{ github.workspace }}/.local/backend/venv/bin/python
           ES_UI_TMPDIR: .local/tmp
-          # Use the runner's installed Chrome sandbox helper for pinned Chromium.
+          # Use installed Chrome with Ubuntu's packaged AppArmor policy.
           # https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
-          CHROME_DEVEL_SANDBOX: /opt/google/chrome/chrome-sandbox
+          ES_BROWSER_EXECUTABLE: /opt/google/chrome/chrome
         run: |
-          test "$(stat -c '%u:%a' "$CHROME_DEVEL_SANDBOX")" = '0:4755'
-          node tests/desktop/setup.mjs --browser
+          test -x "$ES_BROWSER_EXECUTABLE"
+          stat -Lc '%F uid=%u mode=%a path=%n' "$ES_BROWSER_EXECUTABLE" /opt/google/chrome/chrome-sandbox
+          readlink -f /opt/google/chrome/chrome-sandbox
+          mkdir -p .local/evidence/desktop
+          "$ES_BROWSER_EXECUTABLE" --version > .local/evidence/desktop/browser-version.txt
+          cat .local/evidence/desktop/browser-version.txt
+          node tests/desktop/setup.mjs
           node --test tests/desktop/environment.test.mjs
           node --experimental-loader ./tests/desktop/loader.mjs tests/desktop/rules.test.mjs
           node tests/desktop/run-browser.mjs
