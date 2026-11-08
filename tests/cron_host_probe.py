@@ -86,7 +86,8 @@ def register(ctx):
     socket.socket.connect = deny
     socket.socket.connect_ex = deny
 ''')
-    clock = datetime.now(timezone.utc).strftime("%H:%M")
+    configured_at = datetime.now(timezone.utc).replace(second=0, microsecond=0).timestamp()
+    clock = datetime.fromtimestamp(configured_at, timezone.utc).strftime("%H:%M")
     (home / "config.yaml").write_text("timezone: UTC\nplugins:\n  enabled: [email-steward, synthetic-mail-fixture]\n  isolation: in_process\n  load_timeout_seconds: 0\n  entries:\n    email-steward:\n      settings:\n        briefs: [\"" + clock + "\"]\n")
     boxes = {key: {"address": address, "history": 0, "messages": {}, "events": [],
                    "labels": [{"id": "Label_" + key, "name": "Triaged"}]}
@@ -155,6 +156,17 @@ def register(ctx):
     loop = asyncio.new_event_loop()
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
+    sys.path.insert(0, str(plugin))
+    from email_steward.runtime import service_from_host
+    from email_steward.security import Access
+    service = service_from_host(PluginContext(
+        parse_manifest_file(plugin / "plugin.yaml", plugin, "user", ""), manager))
+    access = Access(home, "12345", "local-operator-cli")
+    # Seed a persisted pre-slot cursor, as on restart. CLI setup may cross a
+    # minute boundary; a cold worker's default one-minute lookback must not
+    # decide whether this synthetic due-brief scenario exists.
+    service.store.set_meta("schedule_cursor", configured_at - 1)
+    first_trigger_at = time.time()
     job = list_jobs()[0]
     try:
         trigger_job(job["id"])
@@ -163,12 +175,6 @@ def register(ctx):
         assert "Suspicious sign-in" in text and "https://mail.google.com/" in text, text
         assert "Email Steward brief" in text and "A1" in text, text
         assert all(item["chat_id"] == "67890" for item in capture.captured)
-        sys.path.insert(0, str(plugin))
-        from email_steward.runtime import service_from_host
-        from email_steward.security import Access
-        service = service_from_host(PluginContext(
-            parse_manifest_file(plugin / "plugin.yaml", plugin, "user", ""), manager))
-        access = Access(home, "12345", "local-operator-cli")
         service.action(access, "ax1", "remind", at=time.time() + 1)
         time.sleep(1.1)
         trigger_job(job["id"])
@@ -194,7 +200,8 @@ def register(ctx):
         assert not service.store.rows("SELECT id FROM outbox WHERE state IN ('sent','accepted')")
         assert (base / "active_profile").read_text().strip() == "foreign"
         assert not list(foreign.rglob("email-steward*")), "The sticky foreign profile must remain untouched"
-        result = {"profile": args.profile, "bundle_sha256": hashlib.sha256(args.bundle.read_bytes()).hexdigest() if args.bundle else None,
+        result = {"schedule_fixture": {"configured_at": configured_at, "cursor_seed": configured_at - 1, "first_trigger_at": first_trigger_at},
+                  "profile": args.profile, "bundle_sha256": hashlib.sha256(args.bundle.read_bytes()).hexdigest() if args.bundle else None,
                   "sticky_foreign_profile_untouched": True, "host_python": sys.executable, "home": str(home), "job": get_job(job["id"]),
                   "executions": list_executions(job_id=job["id"]), "captured": capture.captured,
                   "commands": commands, "plugin_files": {

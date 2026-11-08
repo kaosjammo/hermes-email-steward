@@ -52,7 +52,11 @@ jobs:
         env:
           ES_PYTHON: ${{ github.workspace }}/.local/backend/venv/bin/python
           ES_UI_TMPDIR: .local/tmp
+          # Use the runner's installed Chrome sandbox helper for pinned Chromium.
+          # https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
+          CHROME_DEVEL_SANDBOX: /opt/google/chrome/chrome-sandbox
         run: |
+          test "$(stat -c '%u:%a' "$CHROME_DEVEL_SANDBOX")" = '0:4755'
           node tests/desktop/setup.mjs --browser
           node --test tests/desktop/environment.test.mjs
           node --experimental-loader ./tests/desktop/loader.mjs tests/desktop/rules.test.mjs
