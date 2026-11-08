@@ -34,8 +34,17 @@ def register(create,s,delivery,monkeypatch):
     monkeypatch.setattr(product,'service_from_host',lambda ctx:s)
     root=ROOT
     ctx=PluginContext(parse_manifest_file(root/'plugin.yaml',root,'project',''),create.manager)
-    product.register(ctx)
+    s._probe_replies = []
     s._probe_effects = []
+    def post(text):
+        s._probe_replies.append(text)
+        s._probe_effects.append('public-post')
+        return SimpleNamespace(ok=True)
+    # This ingress fixture has no gateway loop. The final call-bound host
+    # collaborator is synthetic here; test_native_multipart exercises the real
+    # public post pipeline separately with the production registration.
+    monkeypatch.setattr(ctx, 'post_message', post)
+    product.register(ctx)
     def provider(account):
         s._probe_effects.append('gmail')
         raise AssertionError('No Gmail use authorised in this ingress test')
@@ -74,14 +83,15 @@ def test_real_event_parser_registered_dispatch_and_foreign_zero_calls(route,monk
     monkeypatch.setattr(aiohttp.ClientSession,'_request',request)
     good=MessageEvent(text='/'+spelling+' consent '+CONSENT,source=create.source)
     handled,result,_=asyncio.run(runner._hm_dispatch_plugin_command(good,good.source,good.get_command()))
-    assert handled and 'Model content sharing updated' in result,(handled,result)
+    assert handled and 'Model content sharing updated' in '\n'.join([*s._probe_replies, result]),(handled,result)
     assert calls == [] and 'native-send' not in s._probe_effects
     assert s.store.meta('model_consent')==CONSENT
     from gateway.session_identity import replace_source
-    before=len(calls);old=s.store.meta('model_consent')
+    before=len(calls);before_replies=len(s._probe_replies);old=s.store.meta('model_consent')
     bad=MessageEvent(text='/'+spelling+' consent off owner=12345',source=replace_source(create.source,user_id='foreign'))
     handled,result,_=asyncio.run(runner._hm_dispatch_plugin_command(bad,bad.source,bad.get_command()))
     assert handled and 'forbidden' in result and len(calls)==before and s.store.meta('model_consent')==old
+    assert len(s._probe_replies)==before_replies, 'Foreign source produced a native post'
     save('dispatcher-'+spelling.replace('@','-'),{'positive':True,'negative':result,'native_calls':calls})
 
 

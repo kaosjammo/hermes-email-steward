@@ -31,6 +31,11 @@ def main():
     base, runtime = root / "home", root / "runtime"
     base.mkdir()
     (base / "config.yaml").write_text("timezone: UTC\n")
+    # The host deliberately normalizes nested homes beneath its native root.
+    # Refuse before CLI startup instead of risking PM state outside this task.
+    from hermes_constants import get_default_hermes_root
+    if get_default_hermes_root(home=base).resolve() != base.resolve():
+        raise SystemExit("Qualification home resolves outside its isolated root; choose a task directory outside the native Hermes data root.")
     foreign = base / "profiles/foreign"
     foreign.mkdir(parents=True)
     (foreign / "config.yaml").write_text("timezone: UTC\n")

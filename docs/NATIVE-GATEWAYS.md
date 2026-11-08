@@ -1,4 +1,4 @@
-> Current delivery uses the owner-created Hermes cron route in [CRON.md](CRON.md). Native commands return text to Hermes. The private adapter sender described in the historical implementation/evidence below has been removed. Its SDK/preflight results are not current cron qualification, and private adapter-attribute checks are no longer a plugin contract. Current exact-candidate and platform qualification is tracked in [source issue #2](https://github.com/kaosjammo/hermes-email-steward/issues/2).
+> Current delivery uses the owner-created Hermes cron route in [CRON.md](CRON.md). Native commands return short text or post bounded parts through public call-bound `ctx.post_message`. The private adapter sender described in the historical implementation/evidence below has been removed. Its SDK/preflight results are not current cron qualification, and private adapter-attribute checks are no longer a plugin contract. Current exact-candidate and platform qualification is tracked in [source issue #2](https://github.com/kaosjammo/hermes-email-steward/issues/2).
 
 # ES-002 requirements and acceptance addendum
 

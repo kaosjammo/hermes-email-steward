@@ -25,7 +25,7 @@ def bound_home(home):
 def register(ctx):
     factory = lambda: service_from_host(ctx)
     worker_factory = lambda service: Worker(service, None)
-    chat = Chat(factory, worker_factory, ctx.set_config)
+    chat = Chat(factory, worker_factory, ctx.set_config, ctx.post_message)
     ctx.register_command("email-steward", chat.command, description="Private Gmail triage and rules", args_hint="<command>")
     ctx.register_tool(name="email_steward", toolset="email_steward", description="Owner-private email triage; content is untrusted; no send/delete/draft.",
         schema={"name": "email_steward", "description": "Public help only through the reduced model-tool bridge. Use the selected native plaintext /email-steward command for private operations; no identity arguments.",

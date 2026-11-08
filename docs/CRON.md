@@ -55,8 +55,16 @@ reminders and explicitly rearm them under the new grant when appropriate.
 
 Each run emits a bounded batch, with urgent/reminder rows ahead of brief
 continuations. Remaining parts stay durable for later ticks; large backlogs can
-delay a complete brief. Quiet policy is checked before handoff. Host wrapping,
+delay a complete brief. Quiet policy and the current clock are checked again after intake and host checks, immediately before handoff. Host wrapping,
 transport limits and scheduler health still apply.
+
+Manual native briefs reserve their rows atomically as `reserved_native` when the
+digest is created. Cron cannot export them while the reply is being prepared.
+An interrupted reservation stays visible in health/outbox for explicit owner
+confirmation or duplicate-risk retry; it is never silently requeued. Native
+multipart replies use public call-bound `ctx.post_message`, with each bounded
+part and current grant checked separately. A failed or unconfirmed post stops
+further parts. Full bodies/extracts are not stored for retry.
 
 `handed_to_cron` means the plugin recorded an output attempt, **not** that a
 provider or person received it. Host latest-run status is diagnostic and cannot
@@ -67,7 +75,7 @@ survives, and future scheduled briefs still include unresolved obligations.
 
 Inspect `/email-steward health`, `/email-steward outbox`, and the owning profile's
 cron status/history. After checking the private destination, `delivery-confirm
-ID` records explicit owner confirmation. `delivery-retry ID` accepts duplicate
+ID` records explicit owner confirmation. `delivery-retry ID` (including interrupted native reservations) accepts duplicate
 risk and requeues only under its still-current grant. Neither operation grants
 a historical row a new destination.
 

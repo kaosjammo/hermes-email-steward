@@ -163,7 +163,9 @@ def check_binding(service, binding, job, key, home, *, allow_paused=False):
 
 
 def cron_tick(ctx, service, key, home, *, now=None):
-    now = time.time() if now is None else now
+    fixed_now = now
+    clock = time.time if now is None else lambda: fixed_now
+    now = clock()
     binding = service.store.meta("cron_binding")
     if not binding:
         raise Error("cron_binding", "Explicit owner schedule setup is required.", 403)
@@ -191,6 +193,7 @@ def cron_tick(ctx, service, key, home, *, now=None):
     Worker(service, None).tick(now)
     with service.store.operation():
         settings = check_binding(service, binding, current_job(ctx, binding), key, home)
+        now = clock()
         selected, size = [], len((FOOTER + "\n\nEmail Steward scheduled output\n\n").encode())
         rows = service.store.rows("SELECT * FROM outbox WHERE state IN ('pending','retry') AND next_try<=? "
             "ORDER BY CASE WHEN category IN ('danger','security','reminder') THEN 0 ELSE 1 END,rowid LIMIT 100", (now,))
@@ -209,6 +212,7 @@ def cron_tick(ctx, service, key, home, *, now=None):
         # grants, cron edits and quiet hours can change during a slow intake run.
         # Never export text selected under an authority that has since changed.
         settings = check_binding(service, binding, current_job(ctx, binding), key, home)
+        now = clock()  # Intake and host checks may have crossed a quiet-hour boundary.
         selected = [row for row in selected if not quiet(settings, now, row["category"])]
         if not selected:
             return ""

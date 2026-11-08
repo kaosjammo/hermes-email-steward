@@ -89,9 +89,11 @@ tests/test_legacy_owner.py
 tests/test_model_routing.py
 tests/test_native.py
 tests/test_native_gateways.py
+tests/test_native_multipart.py
 tests/test_obligation_context.py
 tests/test_presentation_council.py
 tests/test_public_contracts.py
 tests/test_repair_cycle1.py
+tests/test_runtime_handoffs.py
 tests/test_timezone.py
 tests/test_worker_safety.py
