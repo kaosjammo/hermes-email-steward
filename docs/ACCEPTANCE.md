@@ -1,8 +1,8 @@
-> Historical synthetic engineering notes. These results refer to earlier internal candidates, not acceptance of this unfinished public snapshot. Current status: https://github.com/kaosjammo/hermes-email-steward/issues/1
+> Historical synthetic engineering notes. These results refer to earlier internal candidates, not acceptance of this unfinished public snapshot. Current status: https://github.com/kaosjammo/hermes-email-steward/issues/2
 
 # R01–R10 implementation and qualification map
 
-**Current status: accepted repair 3, consumed 3/5, remaining 2; locally qualified, parent combined-candidate acceptance pending.** Cycle 2 closing verdicts were A NOT_READY / B scoped PASS, combined NOT_READY for R2-A-001/002. The sourced model-routing-v2 authority remains unchanged. Earlier receipts are historical, not rebound to new backend bytes. Gateway expansion is now ES-002 implementation scope; parent will review the eventual combined candidate and alone declare readiness.
+**Current release qualification is in progress under issue #2, with uncapped independent review/fix cycles.** The historical repair accounting and old scoped verdicts below are not current candidate approval or a remaining review budget. Working cron delivery, fresh integrated checks, independent exact-candidate review and verified publication are required for the new release phase.
 
 This map describes implementation and locally executed evidence, not an independent review verdict or live-readiness claim. The parent owns final integration, source freeze, issue updates and independent review. The parser and Desktop lanes retain their own acceptance evidence.
 
@@ -11,7 +11,7 @@ This map describes implementation and locally executed evidence, not an independ
 The current repair candidate addresses A-001–A-006, ES-B-002 and Minor
 ES-B-003. ES-B-001 duplicates A-002. The six original Important defects plus
 A-006's separately accepted disclosure/consent defect are tracked in
-[BUILD-HANDOFF.md](BUILD-HANDOFF.md#accepted-repair-cycle-1-successor).
+the retained historical qualification records.
 Initial review verdicts and controller reproductions remain unchanged.
 
 All executable source, tests and dependency declarations were hash-bound to a

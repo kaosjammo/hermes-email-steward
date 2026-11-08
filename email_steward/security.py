@@ -132,14 +132,11 @@ def desktop_access(settings, request):
             return Access(settings.home, settings.owner, "desktop-native")
     session = getattr(request.state, "session", None)
     if session is not None and settings.desktop_session_user and settings.desktop_session_provider:
-        from hermes_cli.dashboard_auth.base import Session
+        from hermes_cli.dashboard_auth import Session
+        from hermes_constants import get_hermes_home
         if (isinstance(session, Session) and session.user_id == settings.desktop_session_user
                 and session.provider == settings.desktop_session_provider
-                and session.issuer == settings.desktop_session_issuer and session.expires_at > time.time()):
+                and session.issuer == settings.desktop_session_issuer and session.expires_at > time.time()
+                and get_hermes_home().resolve() == settings.home):
             return Access(settings.home, settings.owner, "desktop-session")
-    if settings.desktop_local_token is True:
-        # Verify the actual host credential anew. A request.state boolean is never authority.
-        from hermes_cli.web_server import _has_valid_session_token
-        if _has_valid_session_token(request):
-            return Access(settings.home, settings.owner, "desktop-token")
     raise Error("unauthenticated", "An explicitly granted verified Hermes host identity is required.", 401)

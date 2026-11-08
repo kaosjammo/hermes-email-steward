@@ -12,118 +12,19 @@ from .security import Access
 from .worker import Worker
 
 
-class HermesDelivery:
-    def __init__(self, ctx, store=None, settings_reader=None):
-        self.ctx, self.store, self.settings_reader = ctx, store, settings_reader
-
-    def _prepare(self, settings, text):
-        settings.require_private()
-        from .gateways import native_target, route_context_matches, missing_dependencies, capability
-        from .outbound import BUDGET
-        from hermes_constants import get_hermes_home
-        from hermes_cli.profiles import get_active_profile_name
-        from tools.send_message_tool import _resolve_tool_target, _resolve_platform_config
-        from tools.send_message_senders import _live_adapter
-        from gateway.config import load_gateway_config
-        if get_hermes_home().resolve() != settings.home or get_active_profile_name() != settings.profile:
-            return None
-        if len(text.encode("utf-8")) > BUDGET:
-            return None
-        target = native_target(settings)
-        if missing_dependencies(settings.platform):
-            return None
-        platform, chat, thread, error = _resolve_tool_target(target)
-        if error or (platform, chat, thread) != (settings.platform, settings.destination, settings.thread):
-            return None
-        host_config = load_gateway_config()
-        native, config, entry, error = _resolve_platform_config(platform, host_config)
-        if error or (entry and entry.send_message_handler):
-            return None
-        if not host_config.platforms.get(native) or not host_config.platforms[native].enabled:
-            return None  # no disabled/absent-platform environment fallback (notably Weixin)
-        if settings.thread and config.reply_to_mode == "off":
-            return None
-        from gateway.channel_directory import lookup_channel_type
-        if platform == "discord" and lookup_channel_type(platform, chat) == "forum":
-            return None
-        if capability(settings.platform).mode == "interactive":
-            attested = self.store.meta("gateway_attestation") if self.store else None
-            if not attested or (attested["generation"], attested["fingerprint"]) != self.store.active_grant:
-                return None
-        _, adapter = _live_adapter(native)
-        if settings.grant_revision and not route_context_matches(settings, config, adapter):
-            return None
-        if adapter is not None and getattr(adapter, "_owner_profile", settings.profile) not in {None, settings.profile}:
-            return None
-        if settings.platform == "slack":
-            # Standalone probes multiple workspace tokens. Only a live unique learned team route
-            # proves the explicitly selected workspace; no primary-client fallback is allowed.
-            if (adapter is None or not settings.scope
-                    or getattr(adapter, "_channel_team", {}).get(chat) != settings.scope
-                    or settings.scope not in getattr(adapter, "_team_clients", {})
-                    or len(getattr(adapter, "_channel_teams", {}).get(chat, set())) != 1):
-                return None
-            from plugins.platforms.slack.adapter import _slash_user_id
-            if _slash_user_id.get() or settings.thread and config.extra.get("reply_broadcast"):
-                return None
-            if adapter._stream_key(chat, {"thread_id": settings.thread}) in adapter._active_streams:
-                return None
-        if settings.platform == "line" and adapter is not None and getattr(adapter, "_pending_buttons", {}).get(chat):
-            return None
-        if settings.platform == "google_chat" and adapter is not None and (
-                adapter._last_inbound_thread.get(chat) or adapter._typing_messages.get(chat)):
-            return None
-        if settings.platform == "wecom" and adapter is not None and chat in adapter._group_chat_ids:
-            return None
-        if settings.platform == "yuanbao" and (adapter is None or type(adapter).get_active() is not adapter):
-            return None
-        if settings.platform == "weixin" and (adapter is None or adapter._split_multiline_messages):
-            return None
-        if settings.platform in {"whatsapp_cloud", "whatsapp"} and adapter is not None and adapter._reply_prefix:
-            return None
-        if settings.platform in {"matrix", "whatsapp_cloud", "wecom"} and adapter is None:
-            return None
-        if self.settings_reader:
-            from .gateways import fingerprint
-            fresh = self.settings_reader()
-            if fingerprint(fresh) != fingerprint(settings) or fresh.grant_revision != settings.grant_revision:
-                return None
-        return target
-
-    def send(self, settings, text, ident):
-        # Native Weixin splits even compact short chatty lines into hidden bubbles.
-        # Preserve every word in one bounded payload, with spaces as separators.
-        if settings.platform == "weixin":
-            text = text.replace("\n", " ")
-        try:
-            target = self._prepare(settings, text)
-        except Exception:
-            # Preflight is read-only: the native send entrypoint has not been invoked.
-            return "blocked"
-        if target is None:
-            return "blocked"
-        from .outbound import receipt
-        from tools.send_message_tool import send_message_tool
-        # Host-owned entrypoint, registry and default dispatch remain authoritative.
-        result = send_message_tool({"action": "send",
-            "target": target, "message": text})
-        if isinstance(result, str):
-            result = json.loads(result)
-        return receipt(result, settings.platform, settings.destination)
-
-
 @contextmanager
 def bound_home(home):
-    # The same host-owned profile runtime scope used by served-profile turns/cron binds
-    # home, fresh secrets and terminal policy together. Plugin code never reads the mapping.
-    from gateway.run import _profile_runtime_scope
-    with _profile_runtime_scope(Path(home)):
-        yield
+    # The caller's host context (captured by spawn_context_thread) owns profile
+    # binding. Never enter private gateway scopes or change process environment.
+    from hermes_constants import get_hermes_home
+    if get_hermes_home().resolve() != Path(home).resolve():
+        raise Error("profile_mismatch", "The owning Hermes profile context is required.", 403)
+    yield
 
 
 def register(ctx):
     factory = lambda: service_from_host(ctx)
-    worker_factory = lambda service: Worker(service, HermesDelivery(ctx, service.store, service.current_settings))
+    worker_factory = lambda service: Worker(service, None)
     chat = Chat(factory, worker_factory, ctx.set_config)
     ctx.register_command("email-steward", chat.command, description="Private Gmail triage and rules", args_hint="<command>")
     ctx.register_tool(name="email_steward", toolset="email_steward", description="Owner-private email triage; content is untrusted; no send/delete/draft.",
@@ -133,7 +34,7 @@ def register(ctx):
     ctx.register_cli_command("email-steward", "Email Steward setup, worker and diagnostics",
         lambda parser: setup_cli(parser), lambda args: cli(ctx, args))
     if ctx.get_config("worker_enabled", False) is True:
-        # Capture owning profile NOW, then rebind on every iteration. No launch-profile fallback.
+        # Capture owning profile and context NOW. Each iteration verifies it remains bound.
         from hermes_constants import get_hermes_home
         from agent.memory_provider import spawn_context_thread
         home = get_hermes_home().resolve()
@@ -182,9 +83,25 @@ def setup_cli(parser):
     sub.add_parser("capabilities")
     sub.add_parser("poll-once")
     sub.add_parser("worker")
+    schedule = sub.add_parser("schedule-install", help="Explicitly create and enable owner-bound Hermes cron delivery")
+    schedule.add_argument("--replace", action="store_true", help="Replace this plugin's verified existing job after a settings/regrant change")
+    tick = sub.add_parser("cron-tick", help="Internal operation invoked by the owner-created cron wrapper")
+    tick.add_argument("--home", required=True)
+    tick.add_argument("--binding", required=True)
 
 
 def cli(ctx, args):
+    if args.operation == "cron-tick":
+        try:
+            from .cron_delivery import cron_tick
+            service = service_from_host(ctx)
+            output = cron_tick(ctx, service, args.binding, args.home)
+            print(json.dumps({"binding": args.binding, "cron_output": output}))
+            return 0
+        except Exception:
+            # The wrapper never exports host startup chatter or sensitive exceptions.
+            print("Email Steward scheduled operation refused; pending work retained.")
+            return 1
     if args.operation == "capabilities":
         from .gateways import inventory
         print(json.dumps({"platforms": inventory(), "activation": "No gateways activated by discovery"}))
@@ -209,15 +126,20 @@ def cli(ctx, args):
             store.set_meta("gateway_revision_floor", revision)
             ctx.set_config("private_confirmed", False)
             for key, value in {**values, "desktop_subject": args.desktop_subject, "timezone": args.timezone}.items():
-                ctx.set_config(key, value)
+                ctx.set_config(key, "" if key == "thread" and value is None else value)
             ctx.set_config("private_confirmed", True)
-        print("One native private grant saved; old queued authority revoked. Existing Gmail state retained. Interactive routes require an actual-source /email-steward command before notifications. No gateway was activated; use status/capabilities for restrictions.")
+        print("One native private grant saved; old queued authority revoked. Existing Gmail state retained. Run schedule-install after mailbox setup to enable Hermes cron delivery. No gateway was activated; use status/capabilities for restrictions.")
         return
     service = service_from_host(ctx)
     service.settings.require_private()
     access = Access(service.settings.home, service.settings.owner, "local-operator-cli")
-    worker = Worker(service, HermesDelivery(ctx, service.store, service.current_settings))
-    if args.operation == "connect":
+    worker = Worker(service, None)
+    if args.operation == "schedule-install":
+        from .cron_delivery import install_schedule
+        binding = install_schedule(ctx, service, replace_existing=args.replace)
+        print("Email Steward scheduled delivery configured through Hermes cron. Job: " + binding["job_id"] +
+              ". Check hermes cron status; the owning scheduler must be running. No provider delivery receipt is implied.")
+    elif args.operation == "connect":
         print(json.dumps(service.connect(access, args.slot, args.address, args.name)))
     elif args.operation == "status":
         from .gateways import binding, capability
@@ -234,5 +156,5 @@ def cli(ctx, args):
         while True:
             with bound_home(home):
                 service = service_from_host(ctx)
-                Worker(service, HermesDelivery(ctx, service.store, service.current_settings)).tick()
+                Worker(service, None).tick()
             time.sleep(service.settings.poll_seconds)

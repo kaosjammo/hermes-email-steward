@@ -1,7 +1,9 @@
+> Current delivery uses the owner-created Hermes cron route in [CRON.md](CRON.md). Native commands return text to Hermes. The private adapter sender described in the historical implementation/evidence below has been removed. Its SDK/preflight results are not current cron qualification, and private adapter-attribute checks are no longer a plugin contract. Current exact-candidate and platform qualification is tracked in [source issue #2](https://github.com/kaosjammo/hermes-email-steward/issues/2).
+
 # ES-002 requirements and acceptance addendum
 
-This document describes the supported native gateway boundaries; it does not establish live-delivery acceptance.
-ES-001; it does not replace its Gmail, obligation, extraction, privacy, Desktop or configured
+This historical addendum records earlier native gateway boundaries; it does not establish current cron or live-delivery acceptance.
+It supplements ES-001 and does not replace its Gmail, obligation, extraction, privacy, Desktop or configured
 Hermes model contracts. Repair-3 predecessor and budget are recorded in
 [ES-002](https://github.com/kaosjammo/hermes-email-steward/issues/1). Original requirements/history remain intact.
 

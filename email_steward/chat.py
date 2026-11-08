@@ -95,9 +95,9 @@ class Chat:
                 rows = s.store.rows("SELECT id,created,category,state,attempts,error,grant_generation FROM outbox WHERE state NOT IN ('sent','accepted') ORDER BY rowid")
                 return {"outbox": [{**row, "origin": s.store.meta("gateway_grant:" + str(row["grant_generation"]))} for row in rows]}
             if command in {"delivery-confirm", "delivery-retry"}:
-                states = ("uncertain", "blocked") if command == "delivery-retry" else ("uncertain",)
+                states = ("uncertain", "blocked", "handed_to_cron", "handed_off") if command == "delivery-retry" else ("uncertain", "handed_to_cron", "handed_off")
                 if not tail or not s.store.rows("SELECT 1 FROM outbox WHERE id=? AND state IN (" + ",".join("?" for _ in states) + ")", (tail, *states)):
-                    raise invalid("Choose an uncertain (or blocked for retry) outbox id; retry may duplicate an uncertain delivery")
+                    raise invalid("Choose an uncertain or handed-off (or blocked for retry) outbox id; retry may duplicate a delivery")
                 row = s.store.rows("SELECT * FROM outbox WHERE id=?", (tail,))[0]
                 if command == "delivery-retry" and row["category"] == "command":
                     raise invalid("Inspection/command bodies are not cached; explicitly repeat the command after considering duplicate risk")
@@ -149,57 +149,35 @@ class Chat:
     def command(self, raw_args, *, source=None, **context):
         from .outbound import chunks
         from .gateways import fingerprint
+        from .replies import command_reply, error_reply
         try:
-            s = self.service_factory()
-            settings = s.current_settings()
-            access = discord_access(settings, source)
-            s.guard(access)
-            original = (fingerprint(settings), settings.grant_revision, s.store.active_grant)
+            service = self.service_factory()
+            settings = service.current_settings()
+            service.guard(discord_access(settings, source))
+            original = (fingerprint(settings), settings.grant_revision, service.store.active_grant)
             result = self.run(raw_args, source=source)
-            from .replies import command_reply
-            parts = chunks(command_reply(raw_args, result, s.store, settings.timezone), s.store.trusted_links)
+            text = command_reply(raw_args, result, service.store, settings.timezone)
+            digest = result.get("digest")
+            if digest:
+                rows = service.store.rows("SELECT id,text FROM outbox WHERE id LIKE ? ORDER BY rowid",
+                                          ("brief:" + digest + ":%",))
+                text = "\n\n".join(row["text"] for row in rows)
+            parts = chunks(text, service.store.trusted_links)
             if len(parts) > 1024:
-                return "Native reply exceeds the bounded inspection budget; no reply content sent. Request text or attachments separately."
-            ident = "command:" + uuid.uuid4().hex
-            worker = self.worker_factory(s)
-            # Only receipt metadata is durable. Explicit full text/attachment inspection
-            # stays transient; never retain those bodies in an outbox/cache for retries.
-            with s.store.operation():
-                fresh = s.current_settings()
-                if (fingerprint(fresh), fresh.grant_revision, s.store.active_grant) != original:
-                    raise Error("grant_revoked", "Grant changed while processing the command; reply content withheld.", 403)
-                s.store.outbox(ident, time.time(), "Owner-requested command reply; content not retained.", "command")
-                s.store.execute("UPDATE outbox SET state='sending' WHERE id=?", (ident,))
-                accepted, state = 0, "blocked"
-                for index, part in enumerate(parts):
-                    try:
-                        fresh = s.current_settings()
-                        s.guard(discord_access(fresh, source))
-                    except Error:
-                        break
-                    if (fingerprint(fresh), fresh.grant_revision, s.store.active_grant) != original:
-                        break
-                    try:
-                        outcome = worker.delivery.send(fresh, part, ident + ":" + str(index + 1))
-                    except Exception:
-                        outcome = "uncertain"
-                    if outcome not in {"accepted", "sent"}:
-                        state = "uncertain" if outcome != "blocked" or accepted else "blocked"
-                        break
-                    accepted += 1
-                else:
-                    state = "accepted"
-                if accepted and state != "accepted":
-                    state = "uncertain"
-                s.store.execute("UPDATE outbox SET state=?,attempts=1,error=? WHERE id=?",
-                    (state, f"Transient command reply: {accepted}/{len(parts)} provider-accepted chunks; no body retained", ident))
-            if state == "accepted":
-                return ("Request not completed. " if "error" in result else "") + f"Reply accepted: {accepted} part(s). Provider acceptance is not delivery or read confirmation."
-            if state == "blocked":
-                return "Reply blocked: no reply content sent. Check health and outbox before repeating the command."
-            return f"Reply uncertain: {accepted}/{len(parts)} parts acknowledged. Some content may have arrived. Check outbox before repeating; a retry may duplicate it."
+                return "Reply exceeds the bounded inspection budget. Request text or attachments separately."
+            with service.store.operation():
+                fresh = service.current_settings()
+                service.guard(discord_access(fresh, source))
+                if (fingerprint(fresh), fresh.grant_revision, service.store.active_grant) != original:
+                    raise Error("grant_revoked", "Grant changed while processing the command; reply withheld.", 403)
+                if digest:
+                    # The command contract hands text to core. It supplies no delivery receipt.
+                    # Keep that distinction, and do not also push the same brief through cron.
+                    for row in rows:
+                        service.store.execute("UPDATE outbox SET state='handed_off',error=? WHERE id=?",
+                            ("Returned to the originating host command; delivery unconfirmed", row["id"]))
+            return "\n\n".join(parts)
         except Error as error:
-            from .replies import error_reply
             return chunks(error_reply(error.body["error"]))[0]
 
     def tool(self, args, **kwargs):

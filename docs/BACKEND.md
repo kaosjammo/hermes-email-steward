@@ -1,4 +1,4 @@
-> Historical synthetic engineering notes. These results refer to earlier internal candidates, not acceptance of this unfinished public snapshot. Current status: https://github.com/kaosjammo/hermes-email-steward/issues/1
+> Historical synthetic engineering notes. These results refer to earlier internal candidates, not acceptance of this unfinished public snapshot. Current status: https://github.com/kaosjammo/hermes-email-steward/issues/2
 
 # Backend implementation and evidence
 
@@ -8,9 +8,9 @@ The backend is a collection of small Python modules around one SQLite metadata s
 
 ## Native integration
 
-Root `__init__.py` loads the package relatively inside Hermes' per-profile plugin namespace. `email_steward.plugin.register` registers `/email-steward`, the `email_steward` model tool and `hermes email-steward`. Background start is opt-in through `worker_enabled`; it uses `spawn_context_thread` and the host-owned full profile runtime scope on each iteration, binding home/secrets/terminal policy without reading credential values in plugin code. CLI setup/connect does not borrow another profile. `dashboard/plugin_api.py` loads its own installed copy by location, so discovery does not depend on the source checkout being cwd or an editable install. There is no dashboard UI or second rule state.
+Root `__init__.py` loads the package relatively inside Hermes' per-profile plugin namespace. `email_steward.plugin.register` registers `/email-steward`, the `email_steward` model tool and `hermes email-steward`. Background start is opt-in through `worker_enabled`; it uses `spawn_context_thread` to capture the owning host context and verifies the captured home on each iteration, without entering private gateway runtime scopes. CLI setup/connect does not borrow another profile. `dashboard/plugin_api.py` loads its own installed copy by location, so discovery does not depend on the source checkout being cwd or an editable install. There is no dashboard UI or second rule state.
 
-Gmail uses the actual `credentialed_provider_request` host helper and declared per-account OAuth IDs. The host attaches/refreshed credentials are never exposed to plugin code. The optional configured-model adapter uses `ctx.llm.complete_structured`; provider, model, agent and profile overrides/tools are absent. The native notification adapter uses the actual `send_message_tool` entrypoint also used by `hermes send`, not the deliberately unregistered `send_message` model tool.
+Gmail uses the actual `credentialed_provider_request` host helper and declared per-account OAuth IDs. The host attaches/refreshed credentials are never exposed to plugin code. The optional configured-model adapter uses `ctx.llm.complete_structured`; provider, model, agent and profile overrides/tools are absent. Native replies return handler text. Scheduled notifications use the owner-created no-agent cron route described in [CRON.md](CRON.md); optional workers only queue output.
 
 Capacity is FOUR separately declared OAuth slots (`gmail-1`…`gmail-4`). More accounts require manifest grant declarations, matching code/CLI allowlists, explicit host-owned authorisation and renewed validation/isolation tests; no dynamic alternate auth system is assumed.
 

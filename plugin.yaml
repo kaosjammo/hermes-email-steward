@@ -2,6 +2,7 @@ name: email-steward
 version: 0.1.0
 manifest_version: 2
 api_version: 1
+requires_hermes: ">=0.23.0"
 kind: standalone
 description: Owner-private Gmail triage with durable obligations and shared Desktop rules
 license: MIT
@@ -96,9 +97,6 @@ config_schema:
   desktop_session_issuer:
     type: str
     default: ""
-  desktop_local_token:
-    type: bool
-    default: false
   worker_enabled:
     type: bool
     default: false

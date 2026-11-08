@@ -57,9 +57,10 @@ def rule_lines(rule):
 def error_reply(error):
     code = error.get('code', '')
     if code == 'principal_unavailable':
-        return ('Commands unavailable here\nThis destination supports notifications only. '
+        return ('Commands unavailable here\nNotification-only destination. '
                 'Use the Gmail link to handle the message, or select a supported interactive destination in setup. '
-                'Hermes Desktop can manage rules and classifications with an owner grant.')
+                'Hermes Desktop can manage rules and classifications with an owner grant.\n'
+                'Details: principal_unavailable')
     title = {'principal_unavailable':'Commands unavailable here', 'forbidden':'Access denied',
              'grant_revoked':'Private destination changed', 'version_conflict':'A newer version exists',
              'validation_error':'Check the command', 'service_unavailable':'Could not complete this request'}.get(code, 'Request not completed')

@@ -8,7 +8,6 @@ from repair_wire import AccountWire, compose, SOURCE
 from email_steward.errors import Error
 from email_steward.gmail import Attachment
 from email_steward.judgement import CONSENT
-from test_native_gateways import route
 
 
 @pytest.fixture
@@ -164,66 +163,53 @@ def test_body_attachment_join_cannot_discard_content_without_hold(wire_env):
     assert item["attachment_status"] == "unreadable" and not item["archived"]
 
 
-def bind_native_wire(wire_env, route):
-    """ES-002 adds actual scoped route/parser preflight before the historical send-count seam."""
-    create, _, _ = route
-    native, _, _, _ = create("discord", "67890")
-    service = wire_env[1]
-    service.settings = replace(native.settings, owner=service.settings.owner)
-    from test_gateways import native_source
-    from email_steward.gateways import native_access
-    source, transport = native_source(service.settings)
-    service.guard(native_access(service.settings, source))
-
-
-def test_current_private_grant_is_checked_before_each_actual_native_send(wire_env, route):
-    from tools import send_message_tool as outbound
-    from email_steward.plugin import HermesDelivery
+def cron_env(wire_env, monkeypatch):
+    from email_steward.cron_delivery import install_schedule
+    from test_cron_delivery import CronContext
     wire, service, access, worker, delivery = wire_env
-    bind_native_wire(wire_env, route)
-    current = [service.settings]
-    service.settings_reader = lambda: current[0]
-    for ident in ("one", "two"):
-        service.store.outbox(ident, 1100, "Synthetic private summary " + ident)
-    calls = []
-    def final_send(args):
-        calls.append(args)
-        current[0] = replace(current[0], private_confirmed=False)
-        return json.dumps({"success": True, "message_id": "99999"})
-    worker.delivery = HermesDelivery(None, service.store)
-    with patch.object(outbound, "_handle_send", final_send):
-        attempt(lambda: worker.flush(1100))
-    assert len(calls) == 1
-    states = {r["id"]: r["state"] for r in service.store.rows("SELECT id,state FROM outbox")}
-    assert states == {"one": "accepted", "two": "pending"}
+    service.settings = replace(service.settings, destination="67890")
+    service.current_settings()
+    ctx = CronContext(service.settings.home)
+    monkeypatch.setattr("email_steward.cron_delivery.prepare_tools", lambda: None)
+    binding = install_schedule(ctx, service)
+    for number in range(1, 6):
+        service.store.outbox(str(number), 1, "Synthetic summary " + str(number) + " " + "x" * 600)
+    return service, ctx, binding
+
+
+def test_current_private_grant_is_checked_before_each_cron_handoff(wire_env, monkeypatch):
+    from email_steward.cron_delivery import cron_tick
+    service, ctx, binding = cron_env(wire_env, monkeypatch)
+    first = cron_tick(ctx, service, binding["key"], service.settings.home, now=1100)
+    assert "Synthetic summary 1" in first and "Synthetic summary 5" not in first
+    before = service.store.rows("SELECT id,state FROM outbox")
+    assert any(row["state"] == "handed_to_cron" for row in before)
+    assert any(row["id"] == "5" and row["state"] == "pending" for row in before)
+    service.settings = replace(service.settings, private_confirmed=False)
+    with pytest.raises(Error):
+        cron_tick(ctx, service, binding["key"], service.settings.home, now=1101)
+    assert service.store.rows("SELECT id,state FROM outbox") == before
+    assert not service.store.rows("SELECT id FROM outbox WHERE state IN ('sent','accepted')")
 
 
 @pytest.mark.parametrize("change", ["quiet", "destination"])
-def test_each_send_uses_current_quiet_and_destination_policy(wire_env, change, route):
-    from tools import send_message_tool as outbound
-    from email_steward.plugin import HermesDelivery
-    wire, service, access, worker, delivery = wire_env
-    bind_native_wire(wire_env, route)
-    current = [service.settings]
-    service.settings_reader = lambda: current[0]
-    for ident in ("one", "two"):
-        service.store.outbox(ident, 1100, "Synthetic summary " + ident)
-    calls = []
-    def final_send(args):
-        calls.append(args)
-        current[0] = replace(current[0], **({"quiet_start": "00:00", "quiet_end": "01:00"}
-            if change == "quiet" else {"destination": "99999", "grant_revision": 2}))
-        return json.dumps({"success": True, "message_id": "99999"})
-    worker.delivery = HermesDelivery(None, service.store)
-    with patch.object(outbound, "_handle_send", final_send):
-        worker.flush(1100)
+def test_each_handoff_uses_current_quiet_and_destination_policy(wire_env, monkeypatch, change):
+    from email_steward.cron_delivery import cron_tick, install_schedule
+    service, ctx, binding = cron_env(wire_env, monkeypatch)
+    first = cron_tick(ctx, service, binding["key"], service.settings.home, now=1100)
+    assert "Synthetic summary 5" not in first
     if change == "quiet":
-        assert len(calls) == 1
-        assert service.store.rows("SELECT state FROM outbox WHERE id='two'")[0]["state"] == "pending"
+        service.settings = replace(service.settings, quiet_start="00:00", quiet_end="01:00")
+        assert cron_tick(ctx, service, binding["key"], service.settings.home, now=1101) == ""
+        assert service.store.rows("SELECT state FROM outbox WHERE id='5'") == [{"state": "pending"}]
     else:
-        # ES-002 supersedes the historical rerouting expectation: old work must stay historical.
-        assert [c["target"] for c in calls] == ["discord:67890"]
-        assert service.store.rows("SELECT state FROM outbox WHERE id='two'")[0]["state"] == "blocked"
+        service.settings = replace(service.settings, destination="99999")
+        with pytest.raises(Error):
+            cron_tick(ctx, service, binding["key"], service.settings.home, now=1101)
+        fresh = install_schedule(ctx, service, replace_existing=True)
+        assert cron_tick(ctx, service, fresh["key"], service.settings.home, now=1102) == ""
+        assert service.store.rows("SELECT state FROM outbox WHERE id='5'") == [{"state": "blocked"}]
+    assert not service.store.rows("SELECT id FROM outbox WHERE state IN ('sent','accepted')")
 
 
 @pytest.mark.parametrize("matched,consented", [(True, False), (True, True), (False, False)])

@@ -42,10 +42,12 @@ def test_real_session_context_owner_derived_never_tool_args(env, upstream):
         clear_session_vars(tokens)
 
 
-def test_verified_upstream_session_exact_identity_expiry_and_type(env, upstream):
+def test_verified_upstream_session_exact_identity_expiry_and_type(env, upstream, monkeypatch):
     from hermes_cli.dashboard_auth.base import Session
     from dataclasses import replace
     s = env[0]
+    import hermes_constants
+    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: s.settings.home)
     settings = replace(s.settings, desktop_subject="", desktop_session_user="u", desktop_session_provider="synthetic", desktop_session_issuer="fixture")
     session = Session("u", "synthetic@example.test", "Synthetic", "", "synthetic", int(time.time()) + 60, "", "", issuer="fixture")
     req = SimpleNamespace(state=SimpleNamespace(session=session))
@@ -84,10 +86,14 @@ def test_model_tool_preserves_restricted_channel_thread_boundary(env, upstream):
         clear_session_vars(tokens)
 
 
-def test_native_delivery_blocks_unattested_host_route_before_send(env, upstream, monkeypatch):
-    from email_steward.plugin import HermesDelivery
+def test_production_intake_queues_output_without_calling_message_tool(env, upstream, monkeypatch):
+    from email_steward.worker import Worker
     from tools import send_message_tool as outbound
+    service, _, provider, *_ = env
     captured = []
-    monkeypatch.setattr(outbound, "_handle_send", lambda args: captured.append(args))
-    assert HermesDelivery(None, env[0].store).send(env[0].settings, "Synthetic private alert", "synthetic-id") == "blocked"
+    monkeypatch.setattr(outbound, "send_message_tool", lambda args: captured.append(args))
+    provider.add("security", subject="Security alert", body="Suspicious sign-in. Please review today.")
+    Worker(service, None).tick(1000)
+    rows = service.store.rows("SELECT state FROM outbox")
+    assert rows and all(row["state"] == "pending" for row in rows)
     assert captured == []

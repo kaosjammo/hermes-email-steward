@@ -147,6 +147,10 @@ class Worker:
         self.service.current_settings()
         provider.mark_triaged(message.id)
         self.crash("after_triaged")
+        # Resolve rule presentation before taking the write transaction. RuleStore.list
+        # opens its own connection; calling it inside this transaction self-deadlocks.
+        rule_name = next((r["name"] for r in self.service.rule_store.list()
+                          if r["id"] == decision.get("rule_id")), None)
         with self.store.transaction() as db:
             ref = self.store.put_item(account, message.thread_id, item, db=db)
             db.execute("INSERT OR IGNORE INTO messages VALUES(?,?,?,?)", (account["id"], message.id, message.thread_id, now))
@@ -158,7 +162,7 @@ class Worker:
             if context_changed and decision["urgent"]:
                 self.store.outbox("urgent:" + account["id"] + ":" + message.id, now,
                     "URGENT · " + ref + "\n" + redact(message.subject, 200) + "\n" + redact(decision["summary"], 400) +
-                    "\nWhy now: " + redact(decision_reason(decision, next((r["name"] for r in self.service.rule_store.list() if r["id"] == decision.get("rule_id")), None)), 500) +
+                    "\nWhy now: " + redact(decision_reason(decision, rule_name), 500) +
                     ("\nDeadline: " + redact(decision["deadline"], 100) if decision.get("deadline") else "") +
                     ("\nDelayed alert: assessment exceeded the five-minute target." if item["late"] else "") +
                     "\n" + next_step(settings, ref) + "\n" + item["link"],
@@ -348,6 +352,10 @@ class Worker:
         return digest
 
     def flush(self, now=None):
+        if self.delivery is None:
+            # Production transport is Hermes cron. Intake/commands only queue;
+            # the explicit cron operation durably hands eligible rows to stdout.
+            return
         now = time.time() if now is None else now
         settings = self._settings()
         settings.require_private()

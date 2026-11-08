@@ -44,7 +44,7 @@ def test_profile_timezone_inherited_and_next_brief_is_not_melbourne(host):
 def test_explicit_plugin_timezone_overrides_profile_for_ctx_and_rest(host):
     host["plugins"] = {"entries": {"email-steward": {"settings": {"timezone": "Europe/London"}}}}
     assert settings_from_host().timezone == "Europe/London"
-    ctx = SimpleNamespace(get_config=lambda key, default=None: "Asia/Tokyo" if key == "timezone" else default)
+    ctx = SimpleNamespace(profile_name="custom", get_config=lambda key, default=None: "Asia/Tokyo" if key == "timezone" else default)
     settings = settings_from_host(ctx)
     assert settings.timezone == "Asia/Tokyo"
     zone = ZoneInfo("Asia/Tokyo")

@@ -19,6 +19,17 @@ page.on('pageerror', error => errors.push(error.message));
 const screenshot = async name => { await page.screenshot({ path: `${evidence}/${name}.png`, fullPage: true }); };
 const check = async (condition, message) => { assert.ok(condition, message); steps.push(message); console.log(`PASS ${message}`); };
 const button = name => page.getByRole('button', { name, exact: true });
+const footerFollowsFields = async target => {
+  const layout = await target.evaluate(() => {
+  const form = document.querySelector('.es-form');
+  const columns = [...(form?.querySelectorAll('.es-definition,.es-preview-panel') || [])];
+  const footer = form?.querySelector('.es-footer')?.getBoundingClientRect();
+  return { width: innerWidth, fieldsBottom: columns.length ? Math.max(...columns.map(column => column.getBoundingClientRect().bottom)) : null,
+    footerTop: footer?.top, footerParent: form?.querySelector('.es-footer')?.parentElement.className };
+  });
+  writeFileSync(`${evidence}/footer-geometry-${layout.width}.json`, JSON.stringify(layout, null, 2));
+  return layout.fieldsBottom !== null && layout.footerTop >= layout.fieldsBottom - 1;
+};
 try {
   await page.goto(`http://127.0.0.1:${port}`); await button('Reset fixture').click();
   await page.getByText('No rules yet', { exact: true }).waitFor(); await screenshot('01-empty-desktop'); steps.push('Empty state rendered');
@@ -35,17 +46,18 @@ try {
   await page.getByRole('switch', { name: 'Disable Invoice attention', exact: true }).click(); await page.getByRole('switch', { name: 'Enable Invoice attention', exact: true }).waitFor();
   await page.reload(); await check(await page.getByRole('switch', { name: 'Enable Invoice attention', exact: true }).getAttribute('aria-checked') === 'false', 'Server reload preserves disabled rule');
   await screenshot('04-rules-desktop');
-  await button('Edit Invoice attention').click(); await page.getByRole('switch', { name: 'Enable this rule after saving', exact: true }).click(); await page.getByLabel('Rule name', { exact: true }).fill('Invoice attention revised');
-  await page.getByLabel('Priority', { exact: true }).fill('250'); await page.getByLabel('Mailbox scope', { exact: true }).selectOption(production ? 'gmail-2' : 'mailbox-2');
+  await button('Edit & preview Invoice attention').click(); await page.getByRole('switch', { name: 'Enable after saving', exact: true }).click(); await page.getByLabel('Rule name', { exact: true }).fill('Invoice attention revised');
+  await page.getByText('Rule order', { exact: true }).click(); await page.getByLabel('Priority', { exact: true }).fill('250'); await page.getByLabel('Mailbox scope', { exact: true }).selectOption(production ? 'gmail-2' : 'mailbox-2');
   await page.getByLabel('Test mailbox', { exact: true }).selectOption(production ? 'gmail-2' : 'mailbox-2'); await page.getByLabel('Test subject', { exact: true }).fill('invoice');
   await button('Preview match').click(); await page.getByRole('heading', { name: 'Rule matches', exact: true }).waitFor();
   await button('Change first rule externally').click(); await button('Save changes').click();
-  await page.getByText(/This changed in another session/).waitFor(); await check(await button('Save changes').isDisabled(), 'Version conflict blocks overwrite'); await screenshot('05-conflict');
+  await page.getByText(/This changed in another session/).waitFor(); await check(await button('Save changes').isDisabled(), 'Version conflict blocks overwrite');
+  await screenshot('05-conflict'); await check(await footerFollowsFields(page), 'Desktop save and conflict area does not overlap form controls');
   await button('Reload latest version').click(); await page.getByRole('heading', { name: 'Edit rule', exact: true }).waitFor();
   await page.waitForFunction(() => document.querySelector('input')?.value === 'Changed elsewhere');
   await check(await page.getByLabel('Rule name', { exact: true }).inputValue() === 'Changed elsewhere', 'Reload installs server version');
-  await page.getByLabel('Rule name', { exact: true }).fill('Invoice attention revised'); await page.getByLabel('Priority', { exact: true }).fill('250');
-  await page.getByRole('switch', { name: 'Enable this rule after saving', exact: true }).click();
+  await page.getByLabel('Rule name', { exact: true }).fill('Invoice attention revised'); await page.getByText('Rule order', { exact: true }).click(); await page.getByLabel('Priority', { exact: true }).fill('250');
+  await page.getByRole('switch', { name: 'Enable after saving', exact: true }).click();
   await page.getByLabel('Test subject', { exact: true }).fill('invoice'); await button('Preview match').click(); await page.getByRole('heading', { name: 'Rule matches', exact: true }).waitFor();
   await button('Save changes').click(); await page.getByRole('heading', { name: 'Invoice attention revised', exact: true }).waitFor();
   await page.reload(); await page.getByRole('heading', { name: 'Invoice attention revised', exact: true }).waitFor(); steps.push('Edit persists across real browser reload');
@@ -59,8 +71,8 @@ try {
   await button('Reject host identity').click(); await button('Refresh').click(); await page.getByText(production ? 'An explicitly granted verified Hermes host identity is required.' : 'This Desktop principal is not authorised.', { exact: true }).waitFor(); await screenshot('07-read-error');
   await page.reload(); await page.getByRole('heading', { name: 'Could not load email rules', exact: true }).waitFor(); await screenshot('14-initial-error'); steps.push('Unauthorised initial read renders full error state');
   await button('Restore service').click(); await button('Reload from server').click();
-  await button('Review Direct requests').click(); await button('Enable pack').click(); await page.getByText('Already added at this scope', { exact: true }).waitFor(); steps.push('Pack approval persisted');
-  await button('Show recent outcomes').click(); await button('Correct ax1').click(); await page.getByLabel('Classification for ax1', { exact: true }).selectOption('needs_action');
+  await button('Review pack Direct requests').click(); await button('Enable pack').click(); await page.getByText('Already added at this scope', { exact: true }).waitFor(); steps.push('Pack approval persisted');
+  await button('Show recent outcomes').click(); await button('Change classification for ax1').click(); await page.getByLabel('Classification for ax1', { exact: true }).selectOption('needs_action');
   await button('Apply one-off correction').click(); await page.getByText('Item corrected. No reusable rule has been added.', { exact: true }).waitFor(); await screenshot('08-correction'); steps.push('One-off correction returns a separate rule suggestion');
   await button('Review suggested rule').click(); await page.getByRole('heading', { name: 'Create rule', exact: true }).waitFor();
   await check(await page.evaluate(() => document.activeElement.id) === 'es-editor-title', 'Editor opening moves keyboard focus');
@@ -71,6 +83,7 @@ try {
   await phone.screenshot({ path: `${evidence}/10-narrow-rules.png`, fullPage: true });
   assert.ok(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Narrow rules screen has no horizontal overflow');
   await phone.getByRole('button', { name: 'Create rule', exact: true }).click();
+  assert.ok(await footerFollowsFields(phone), 'Narrow save area does not overlap form controls');
   await phone.screenshot({ path: `${evidence}/11-narrow-editor.png`, fullPage: true });
   assert.ok(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Narrow editor has no horizontal overflow'); steps.push('390px rules and editor have no horizontal overflow');
   await narrow.close(); assert.deepEqual(errors, []); steps.push('No browser page errors');

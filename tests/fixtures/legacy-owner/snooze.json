@@ -1,0 +1,146 @@
+{
+  "predecessor": "3efca2b3f3831f1d45cd06c4647a4bf5555893f7",
+  "database_name": "state.sqlite3",
+  "sql": "BEGIN TRANSACTION;\nCREATE TABLE accounts(id TEXT PRIMARY KEY,address TEXT UNIQUE NOT NULL,\n              display_name TEXT NOT NULL,grant_id TEXT UNIQUE NOT NULL,checkpoint TEXT NOT NULL,\n              baseline REAL NOT NULL,last_poll REAL,last_error TEXT);\nINSERT INTO \"accounts\" VALUES('gmail-1','alex@example.test','Synthetic A','gmail-1','2',1794114784.528944,1100.0274782290071,NULL);\nCREATE TABLE aliases(digest TEXT NOT NULL,alias TEXT NOT NULL,reference TEXT NOT NULL,\n              PRIMARY KEY(digest,alias));\nCREATE TABLE digests(id TEXT PRIMARY KEY,slot TEXT UNIQUE NOT NULL,created REAL NOT NULL);\nCREATE TABLE effects(id TEXT PRIMARY KEY,mailbox_id TEXT NOT NULL,thread_id TEXT NOT NULL,\n              reference TEXT NOT NULL,desired TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending');\nINSERT INTO \"effects\" VALUES('ax1:2:archive','gmail-1','t','ax1','{\"archived\":true}','done');\nCREATE TABLE items(seq INTEGER PRIMARY KEY AUTOINCREMENT,reference TEXT UNIQUE,\n              mailbox_id TEXT NOT NULL,thread_id TEXT NOT NULL,version INTEGER NOT NULL,data TEXT NOT NULL,\n              UNIQUE(mailbox_id,thread_id));\nINSERT INTO \"items\" VALUES(1,'ax1','gmail-1','t',3,'{\"classification\":\"needs_action\",\"archive\":false,\"summary\":\"Request: approve disputed renewal by Friday at 17:00.\",\"reason\":\"Conservative local request/problem hold. Model content consent has not been granted. Substantive request or problem needs an owner decision\",\"rule_id\":null,\"urgent\":false,\"urgent_category\":\"deadline\",\"holds\":[\"Substantive request or problem needs an owner decision\"],\"deadline\":\"Friday at 17:00\",\"sender\":\"billing@example.test\",\"subject\":\"Question\",\"attachment_status\":\"none\",\"archived\":true,\"latest_message\":\"m2\",\"received\":1001.0,\"changed\":1794114784.6582644,\"snooze_until\":1794118384.6581235,\"reminder_at\":null,\"last_sent\":0,\"link\":\"https://mail.google.com/mail/u/?authuser=alex%40example.test#all/t\",\"late\":false,\"synced_at\":1100.1048723849963}');\nCREATE TABLE jobs(mailbox_id TEXT NOT NULL,id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',\n              attempts INTEGER NOT NULL DEFAULT 0,next_try REAL NOT NULL DEFAULT 0,error TEXT,PRIMARY KEY(mailbox_id,id));\nINSERT INTO \"jobs\" VALUES('gmail-1','a-pending','pending',1,1130.0,'Processing or provider mutation failed; retry pending');\nINSERT INTO \"jobs\" VALUES('gmail-1','m2','done',0,0.0,NULL);\nCREATE TABLE messages(mailbox_id TEXT NOT NULL,id TEXT NOT NULL,thread_id TEXT NOT NULL,\n              processed REAL NOT NULL,PRIMARY KEY(mailbox_id,id));\nINSERT INTO \"messages\" VALUES('gmail-1','m2','t',1100.0859039460047);\nCREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);\nINSERT INTO \"meta\" VALUES('owner_binding','{\"home\":\"{{CASE_HOME}}\",\"owner\":\"owner\"}');\nINSERT INTO \"meta\" VALUES('worker_health','{\"at\":1100.1231470530038,\"errors\":[\"Message processing pending retry\"]}');\nINSERT INTO \"meta\" VALUES('schedule_cursor','1100.1231470530038');\nINSERT INTO \"meta\" VALUES('heartbeat','1100.1231470530038');\nCREATE TABLE outbox(id TEXT PRIMARY KEY,created REAL NOT NULL,text TEXT NOT NULL,\n              category TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,\n              next_try REAL NOT NULL DEFAULT 0,error TEXT);\nCREATE TABLE packs(pack TEXT NOT NULL,scope TEXT NOT NULL,rule_ids TEXT NOT NULL,PRIMARY KEY(pack,scope));\nCREATE TABLE rules(id TEXT PRIMARY KEY,version INTEGER NOT NULL,data TEXT NOT NULL);\nDELETE FROM \"sqlite_sequence\";\nINSERT INTO \"sqlite_sequence\" VALUES('items',1);\nCOMMIT;",
+  "seed": {
+    "source": "predecessor-product-3efca2b",
+    "before": {
+      "classification": "needs_action",
+      "archive": false,
+      "summary": "Request: approve disputed renewal by Friday at 17:00.",
+      "reason": "Conservative local request/problem hold. Model content consent has not been granted. Substantive request or problem needs an owner decision",
+      "rule_id": null,
+      "urgent": false,
+      "urgent_category": "deadline",
+      "holds": [
+        "Substantive request or problem needs an owner decision"
+      ],
+      "deadline": "Friday at 17:00",
+      "sender": "billing@example.test",
+      "subject": "Question",
+      "attachment_status": "none",
+      "archived": true,
+      "latest_message": "m2",
+      "received": 1001.0,
+      "changed": 1794114784.6582644,
+      "snooze_until": 1794118384.6581235,
+      "reminder_at": null,
+      "last_sent": 0,
+      "link": "https://mail.google.com/mail/u/?authuser=alex%40example.test#all/t",
+      "late": false,
+      "synced_at": 1100.1048723849963,
+      "reference": "ax1",
+      "mailbox_id": "gmail-1",
+      "thread_id": "t",
+      "version": 3
+    },
+    "boxes": {
+      "A": {
+        "address": "alex@example.test",
+        "history": 2,
+        "messages": {
+          "a-pending": {
+            "id": "a-pending",
+            "threadId": "t",
+            "internalDate": "1003000",
+            "labelIds": [
+              "INBOX",
+              "Label_A",
+              "UNREAD"
+            ],
+            "payload": {
+              "mimeType": "text/plain",
+              "headers": [
+                {
+                  "name": "From",
+                  "value": "billing@example.test"
+                },
+                {
+                  "name": "Subject",
+                  "value": "Notice"
+                }
+              ],
+              "body": {
+                "data": "UGxlYXNlIGFwcHJvdmUgb2Jzb2xldGUgcXVvdGUgdG9kYXku",
+                "size": 36
+              }
+            }
+          },
+          "m2": {
+            "id": "m2",
+            "threadId": "t",
+            "internalDate": "1001000",
+            "labelIds": [
+              "INBOX",
+              "Label_A",
+              "UNREAD"
+            ],
+            "payload": {
+              "mimeType": "text/plain",
+              "headers": [
+                {
+                  "name": "From",
+                  "value": "billing@example.test"
+                },
+                {
+                  "name": "Subject",
+                  "value": "Question"
+                }
+              ],
+              "body": {
+                "data": "UGxlYXNlIGFwcHJvdmUgZGlzcHV0ZWQgcmVuZXdhbCBieSBGcmlkYXkgYXQgMTc6MDAu",
+                "size": 51
+              }
+            }
+          }
+        },
+        "events": [
+          [
+            1,
+            "a-pending"
+          ],
+          [
+            2,
+            "m2"
+          ]
+        ],
+        "labels": [
+          {
+            "id": "Label_A",
+            "name": "Triaged"
+          }
+        ]
+      },
+      "B": {
+        "address": "other@example.test",
+        "history": 0,
+        "messages": {},
+        "events": [],
+        "labels": [
+          {
+            "id": "Label_B",
+            "name": "Triaged"
+          }
+        ]
+      }
+    },
+    "jobs": [
+      {
+        "mailbox_id": "gmail-1",
+        "id": "a-pending",
+        "status": "pending",
+        "attempts": 1,
+        "next_try": 1130.0,
+        "error": "Processing or provider mutation failed; retry pending"
+      },
+      {
+        "mailbox_id": "gmail-1",
+        "id": "m2",
+        "status": "done",
+        "attempts": 0,
+        "next_try": 0.0,
+        "error": null
+      }
+    ]
+  }
+}
