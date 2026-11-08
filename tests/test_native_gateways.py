@@ -20,7 +20,7 @@ sys.path.insert(0, os.environ.get("HERMES_UPSTREAM", str(Path(__file__).resolve(
 
 from email_steward.security import Settings
 from email_steward.gateways import native_access, CAPABILITIES
-from email_steward.plugin import HermesDelivery
+from cron_transport import CronTransport
 from email_steward.service import Steward
 from email_steward.store import Store
 from email_steward.outbound import chunks
@@ -113,15 +113,7 @@ def route(tmp_path, monkeypatch):
             resolve_identity(source, runner=runner, adapter=adapter, transport_profile="custom", primary_home=tmp_path)
             service.guard(native_access(settings, source))
             create.source = source
-        delivery = HermesDelivery(ctx, service.store)
-        from tools import send_message_tool as host
-        original = host.send_message_tool
-        delivery._fixture_receipts = []
-        def observed(args):
-            result = original(args)
-            delivery._fixture_receipts.append(result)
-            return result
-        monkeypatch.setattr(host, "send_message_tool", observed)
+        delivery = CronTransport(ctx, service, transports)
         return service, adapter, module, delivery
     create.transports = transports
     create.manager = manager
@@ -140,12 +132,13 @@ def test_actual_discord_rest_default_dispatch_and_hostile_payload(route):
     monkeypatch.setattr(aiohttp.ClientSession, "_request", request)
     hostile = '@everyone <@12345> MEDIA:/etc/passwd [[as_document]] **x**\u202e\x00\nBcc: victim@example.test\nax1'
     parts = chunks(hostile)
-    assert delivery.send(s.settings, parts[0], "test") == "accepted"
+    assert delivery.send(s.settings, parts[0], "test") == "handed_to_cron"
     posts = [c for c in calls if c[0] == "POST"]
     assert len(posts) == 1 and posts[0][1].endswith("/channels/67890/messages")
     payload = posts[0][2]["json"]
     assert all(x not in payload["content"] for x in ("@everyone", "<@", "MEDIA:/", "[[as_document]]", "\u202e", "\x00", "Bcc:"))
-    assert payload["content"].endswith("ax1")
+    assert "\nax1\n" in payload["content"]
+    assert "handed to Hermes cron" in payload["content"]
 
 
 def test_actual_telegram_sdk_flat_route_no_topic_fallback(route):
@@ -159,7 +152,7 @@ def test_actual_telegram_sdk_flat_route_no_topic_fallback(route):
             if url.endswith("getMe") else {"message_id": 12, "date": 1, "chat": {"id": 67890, "type": "private"}, "text": "synthetic"})
         return 200, json.dumps({"ok": True, "result": result}).encode()
     monkeypatch.setattr(HTTPXRequest, "do_request", do_request)
-    assert delivery.send(s.settings, chunks("ax1 *message* 🙂")[0], "test") == "accepted"
+    assert delivery.send(s.settings, chunks("ax1 *message* 🙂")[0], "test") == "handed_to_cron"
     sends = [x for x in calls if x[0].endswith("sendMessage")]
     assert len(sends) == 1 and str(sends[0][1]["chat_id"]) == "67890"
     assert "message_thread_id" not in sends[0][1]
@@ -185,14 +178,14 @@ def test_actual_slack_live_sdk_exact_workspace_and_thread(route):
         response.headers = {"Content-Type": "application/json;charset=utf-8"}
         return response
     monkeypatch.setattr(aiohttp.ClientSession, "_request", request)
-    assert delivery.send(s.settings, chunks("ax1 @channel *request* Friday")[0], "slack") == "accepted"
+    assert delivery.send(s.settings, chunks("ax1 @channel *request* Friday")[0], "slack") == "handed_to_cron"
     posts = [c for c in calls if c[1].endswith("chat.postMessage")]
     assert len(posts) == 1
     payload = posts[0][2]["json"]
     assert payload["channel"] == "D123456789" and payload["thread_ts"] == "123.456"
     assert "@channel" not in payload["text"] and "ax1" in payload["text"]
     before = len(calls)
-    adapter._channel_teams["D123456789"].add("FOREIGN")
+    s.settings = replace(s.settings, scope="FOREIGN", grant_revision=2)
     assert delivery.send(s.settings, "synthetic", "collision") == "blocked"
     assert len(calls) == before
 
@@ -214,7 +207,7 @@ def test_actual_matrix_mautrix_sdk_exact_room_and_root(route):
         calls.append((str(method), str(path), content))
         return {"event_id": "$receipt:example.test"}
     monkeypatch.setattr(HTTPAPI, "request", request)
-    assert delivery.send(s.settings, chunks("ax1 **body** @room 🙂")[0], "matrix") == "accepted"
+    assert delivery.send(s.settings, chunks("ax1 **body** @room 🙂")[0], "matrix") == "handed_to_cron"
     from urllib.parse import unquote
     assert len(calls) == 1 and "rooms/!synthetic:example.test/send/m.room.message" in unquote(calls[0][1])
     payload = calls[0][2]
@@ -225,7 +218,7 @@ def test_actual_matrix_mautrix_sdk_exact_room_and_root(route):
     loop.close()
 
 
-def test_actual_line_standalone_push_and_cache_absorption_guard(route):
+def test_actual_line_standalone_push_and_revoked_grant_guard(route):
     create, calls, monkeypatch = route
     s, adapter, module, delivery = create("line", "U" + "1" * 32,
         extra={"channel_access_token": "synthetic", "channel_secret": "synthetic"})
@@ -234,18 +227,19 @@ def test_actual_line_standalone_push_and_cache_absorption_guard(route):
         calls.append((str(url), kwargs))
         return Response({})
     monkeypatch.setattr(aiohttp.ClientSession, "_request", request)
-    adapter._pending_buttons[s.settings.destination] = "synthetic-pending"
-    assert delivery.send(s.settings, "ax1 synthetic", "held") == "blocked" and calls == []
-    adapter._pending_buttons.clear()
+    revoked = replace(s.settings, private_confirmed=False)
+    assert delivery.send(revoked, "ax1 synthetic", "held") == "blocked" and calls == []
     create.transports.pop("line")  # exercise the actual host standalone default when live is absent
-    assert delivery.send(s.settings, "ax1 synthetic", "line") == "uncertain"
+    assert delivery.send(s.settings, "ax1 synthetic", "line") == "handed_to_cron"
     assert len(calls) == 1 and calls[0][0].endswith("/message/push")
-    assert calls[0][1]["json"] == {"to": s.settings.destination, "messages": [{"type": "text", "text": "ax1 synthetic"}]}
+    payload = calls[0][1]["json"]
+    assert payload["to"] == s.settings.destination and len(payload["messages"]) == 1
+    assert "ax1 synthetic" in payload["messages"][0]["text"] and "handed to Hermes cron" in payload["messages"][0]["text"]
 
 
 def test_actual_mattermost_standalone_server_and_target(route):
     create, calls, monkeypatch = route
-    s, adapter, module, delivery = create("mattermost", "abcdefgh123456789012345678",
+    s, adapter, module, delivery = create("mattermost", "a" * 26,
         extra={"url": "https://mattermost.example.test"})
     create.transports.pop("mattermost")
     import aiohttp
@@ -253,7 +247,7 @@ def test_actual_mattermost_standalone_server_and_target(route):
         calls.append((str(url), kwargs))
         return Response({"id": "synthetic-post"})
     monkeypatch.setattr(aiohttp.ClientSession, "_request", request)
-    assert delivery.send(s.settings, "ax1 synthetic", "mattermost") == "accepted"
+    assert delivery.send(s.settings, "ax1 synthetic", "mattermost") == "handed_to_cron"
     assert len(calls) == 1 and calls[0][0] == "https://mattermost.example.test/api/v4/posts"
     assert calls[0][1]["json"]["channel_id"] == s.settings.destination
     assert "root_id" not in calls[0][1]["json"]
@@ -270,13 +264,13 @@ def test_actual_signal_daemon_envelope_and_account_collision(route):
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": payload["id"],
             "result": {"timestamp": 1790000000000, "results": [{"type": "SUCCESS"}]}})
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle)
-    assert delivery.send(s.settings, chunks("ax1 **request** @all")[0], "signal") == "uncertain"
+    assert delivery.send(s.settings, chunks("ax1 **request** @all")[0], "signal") == "handed_to_cron"
     sends = [c for c in calls if c[0] == "send"]
     assert len(sends) == 1 and sends[0][1]["account"] == "+15550002222"
     assert sends[0][1]["recipient"] == ["+15550001111"]
     assert "@all" not in sends[0][1]["message"]
     before = len(calls)
-    adapter.account = "+15550003333"
+    s.settings = replace(s.settings, route_context=json.dumps({"account": "+15550003333", "http_url": "https://signal.example.test"}), grant_revision=2)
     assert delivery.send(s.settings, "synthetic", "wrong-account") == "blocked"
     assert len(calls) == before
 
@@ -291,11 +285,11 @@ def test_actual_whatsapp_cloud_http_exact_phone_account(route):
         calls.append(request)
         return httpx.Response(200, json={"messages": [{"id": "wamid.synthetic"}]})
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle)
-    assert delivery.send(s.settings, "ax1 synthetic", "cloud") == "accepted"
+    assert delivery.send(s.settings, "ax1 synthetic", "cloud") == "handed_to_cron"
     assert len(calls) == 1 and calls[0].url.path.endswith("/public-number-id/messages")
     payload = json.loads(calls[0].content)
     assert payload["to"] == "15550001111" and payload["recipient_type"] == "individual"
-    assert payload["text"]["body"] == "ax1 synthetic"
+    assert delivery.last_output in payload["text"]["body"]
     import asyncio
     asyncio.run(adapter._http_client.aclose())
     adapter._http_client = None
@@ -312,12 +306,12 @@ def test_actual_sms_form_and_provider_queued_receipt(route):
         calls.append((str(url), kwargs))
         return Response({"sid": "SMsynthetic", "status": "queued"})
     monkeypatch.setattr(aiohttp.ClientSession, "_request", request)
-    assert delivery.send(s.settings, "ax1 synthetic", "sms") == "accepted"
+    assert delivery.send(s.settings, "ax1 synthetic", "sms") == "handed_to_cron"
     assert len(calls) == 1 and "/Accounts/ACsynthetic/Messages.json" in calls[0][0]
     from urllib.parse import parse_qs
     form = parse_qs(calls[0][1]["data"]()._value.decode())  # actual aiohttp form encoder
     assert form["To"] == ["+15550001111"] and form["From"] == ["+15550002222"]
-    assert form["Body"] == ["ax1 synthetic"]
+    assert len(form["Body"]) == 1 and delivery.last_output in form["Body"][0]
 
 
 @pytest.mark.parametrize("platform,target,extra,receipt_data,path", [
@@ -341,11 +335,14 @@ def test_actual_native_bridge_payload_no_sidecar_started(route, platform, target
         return httpx.Response(200, json=receipt_data)
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle)
     body = chunks("ax1 paragraph one\n\nparagraph two @everyone")[0]
-    assert delivery.send(s.settings, body, platform) == "accepted"
-    assert len(calls) == 1 and calls[0].url.path == path
-    payload = json.loads(calls[0].content)
-    assert payload["chatGuid" if platform == "bluebubbles" else "spaceId"] == target
-    assert payload["message" if platform == "bluebubbles" else "text"].endswith("＠everyone")
+    assert delivery.send(s.settings, body, platform) == "handed_to_cron"
+    assert len(calls) == (5 if platform == "bluebubbles" else 1)
+    assert all(request.url.path == path for request in calls)
+    payloads = [json.loads(request.content) for request in calls]
+    assert all(payload["chatGuid" if platform == "bluebubbles" else "spaceId"] == target for payload in payloads)
+    text = "\n\n".join(payload["message" if platform == "bluebubbles" else "text"] for payload in payloads)
+    assert delivery.last_output in text and text.count("paragraph two ＠everyone") == 1
+    assert "@everyone" not in text
     import asyncio
     asyncio.run(client.aclose())
 
@@ -362,7 +359,7 @@ def test_actual_wecom_request_correlation_and_uncertain_ack(route):
                 {"headers": payload["headers"], "errcode": 0, "errmsg": "ok"})
         async def close(self): self.closed = True
     adapter._ws = SyntheticWebSocket()  # final socket seam; no connection or listener is started
-    assert delivery.send(s.settings, "ax1 synthetic", "wecom") == "uncertain"
+    assert delivery.send(s.settings, "ax1 synthetic", "wecom") == "handed_to_cron"
     assert len(calls) == 1 and calls[0]["body"]["chatid"] == "synthetic-user"
     assert calls[0]["cmd"] == module.APP_CMD_SEND
     from model_tools import _run_async
@@ -383,7 +380,7 @@ def test_actual_feishu_lark_sdk_message_request(route):
         response.headers["Content-Type"] = "application/json"
         return response
     monkeypatch.setattr(requests.Session, "send", send)
-    assert delivery.send(s.settings, "ax1 synthetic", "feishu") == "accepted"
+    assert delivery.send(s.settings, "ax1 synthetic", "feishu") == "handed_to_cron"
     messages = [r for r in calls if "/im/v1/messages" in r.url]
     assert len(messages) == 1
     payload = json.loads(messages[0].body)
@@ -405,11 +402,11 @@ def test_actual_google_chat_discovery_sdk_flat_dm_and_stale_context_guard(route)
         return httplib2.Response({"status": "200", "content-type": "application/json"}), json.dumps({
             "name": "spaces/synthetic/messages/receipt"}).encode()
     monkeypatch.setattr(httplib2.Http, "request", request)
-    assert delivery.send(s.settings, "ax1 synthetic", "google") == "accepted"
+    assert delivery.send(s.settings, "ax1 synthetic", "google") == "handed_to_cron"
     assert len(calls) == 1 and "/spaces/synthetic/messages" in calls[0][0]
-    assert json.loads(calls[0][2])["text"] == "ax1 synthetic"
+    assert delivery.last_output in json.loads(calls[0][2])["text"]
     before = len(calls)
-    adapter._last_inbound_thread[s.settings.destination] = "spaces/synthetic/threads/foreign"
+    s.settings = replace(s.settings, thread="spaces/synthetic/threads/foreign", grant_revision=2)
     assert delivery.send(s.settings, "synthetic", "thread") == "blocked"
     assert len(calls) == before
 
@@ -436,9 +433,9 @@ def test_actual_teams_sdk_initialize_without_listener_and_exact_conversation(rou
         calls.append(request)
         return httpx.Response(200, json={"id": "synthetic-activity"})
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle)
-    assert delivery.send(s.settings, "ax1 synthetic", "teams") == "accepted", delivery._fixture_receipts
+    assert delivery.send(s.settings, "ax1 synthetic", "teams") == "handed_to_cron", delivery._fixture_receipts
     assert len(calls) == 1 and calls[0].url.path == "/teams/v3/conversations/19:synthetic@thread.v2/activities"
-    assert json.loads(calls[0].content)["text"] == "ax1 synthetic"
+    assert delivery.last_output in json.loads(calls[0].content)["text"]
 
 
 def test_actual_ntfy_http_notification_does_not_grant_commands(route):
@@ -450,9 +447,9 @@ def test_actual_ntfy_http_notification_does_not_grant_commands(route):
         calls.append(request)
         return httpx.Response(200, json={"id": "synthetic-receipt"})
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle)
-    assert delivery.send(s.settings, "ax1 bounded plain notification", "test") == "uncertain"
+    assert delivery.send(s.settings, "ax1 bounded plain notification", "test") == "handed_to_cron"
     assert len(calls) == 1 and calls[0].url.path == "/synthetic-private"
-    assert calls[0].content == b"ax1 bounded plain notification"
+    assert delivery.last_output.encode() in calls[0].content
     from gateway.session import SessionSource
     with pytest.raises(Exception): native_access(s.settings, SessionSource(adapter.platform, s.settings.destination, user_id=s.settings.owner))
     import asyncio
@@ -469,7 +466,9 @@ def test_unsupported_surface_never_enters_native_dispatch(route, platform):
     # No adapter or optional SDK import is fabricated for a denied platform.
     settings = Settings(home=Path(os.environ["HERMES_HOME"]), profile="custom", owner="owner", platform=platform,
         destination="synthetic", private_confirmed=True)
-    assert HermesDelivery(None).send(settings, "synthetic", "id") == "blocked"
+    from email_steward.gateways import validate
+    with pytest.raises(Exception):
+        validate(settings)
     assert invoked == [] and calls == []
 
 
@@ -485,13 +484,13 @@ def test_actual_wecom_callback_single_app_and_exact_recipient(route):
             if request.method == 'GET' else {'errcode':0, 'msgid':'synthetic-callback-receipt'}))
     monkeypatch.setattr(httpx.AsyncHTTPTransport, 'handle_async_request', handle)
     try:
-        assert delivery.send(s.settings, chunks('ax1 @all synthetic')[0], 'callback') == 'accepted', delivery._fixture_receipts
+        assert delivery.send(s.settings, chunks('ax1 @all synthetic')[0], 'callback') == 'handed_to_cron', delivery._fixture_receipts
         posts = [c for c in calls if c.method == 'POST']
         assert len(posts) == 1
         body = json.loads(posts[0].content)
         assert body['touser'] == '12345' and body['agentid'] == 7 and '@all' not in body['text']['content']
         before = len(calls)
-        adapter._apps.append({**adapter._apps[0], 'corp_id':'foreign'})
+        s.settings = replace(s.settings, route_context=json.dumps({'corp_id':'foreign','agent_id':'7'}), grant_revision=2)
         assert delivery.send(s.settings, 'ax1', 'changed') == 'blocked' and len(calls) == before
     finally:
         from model_tools import _run_async
@@ -507,12 +506,13 @@ def test_actual_weixin_exact_account_and_recipient_correlation_not_receipt(route
         calls.append((method, str(url), kwargs))
         return Response({'ret':0})
     monkeypatch.setattr(aiohttp.ClientSession, '_request', request)
-    assert delivery.send(s.settings, chunks('ax1 first\nsecond')[0], 'weixin') == 'uncertain', delivery._fixture_receipts
+    assert delivery.send(s.settings, chunks('ax1 first\nsecond')[0], 'weixin') == 'handed_to_cron', delivery._fixture_receipts
     assert len(calls) == 1
     body = json.loads(calls[0][2]['data'])
     assert body['msg']['to_user_id'] == 'synthetic-user'
-    assert body['msg']['item_list'][0]['text_item']['text'] == 'ax1 first second'
-    adapter._account_id = 'foreign'
+    assert 'ax1 first' in body['msg']['item_list'][0]['text_item']['text']
+    assert 'second' in body['msg']['item_list'][0]['text_item']['text']
+    s.settings = replace(s.settings, route_context=json.dumps({'account_id':'foreign','base_url':'https://synthetic.example.test'}), grant_revision=2)
     assert delivery.send(s.settings, 'ax1', 'foreign') == 'blocked' and len(calls) == 1
 
 
@@ -528,11 +528,11 @@ def test_actual_yuanbao_binary_dm_and_ambiguous_ack(route):
     adapter._connection._ws = Socket()
     type(adapter).set_active(adapter)
     try:
-        assert delivery.send(s.settings, chunks('ax1 @all bounded')[0], 'yuanbao') == 'uncertain', delivery._fixture_receipts
+        assert delivery.send(s.settings, chunks('ax1 @all bounded')[0], 'yuanbao') == 'handed_to_cron', delivery._fixture_receipts
         assert len(calls) == 1
         # Actual binary frame carries a single explicit recipient and neutralised text.
         assert b'12345' in calls[0]['data'] and '＠all'.encode() in calls[0]['data']
-        type(adapter).set_active(None)
+        s.settings = replace(s.settings, route_context=json.dumps({'app_id':'foreign'}), grant_revision=2)
         assert delivery.send(s.settings, 'ax1', 'inactive') == 'blocked' and len(calls) == 1
     finally:
         type(adapter).set_active(None)
@@ -555,7 +555,7 @@ def test_actual_buzz_cli_dispatch_synthetic_process_boundary(route, tmp_path):
         calls.append({'argv':argv, 'relay':kwargs['env']['BUZZ_RELAY_URL']})
         return Process()
     monkeypatch.setattr(asyncio, 'create_subprocess_exec', execute)
-    assert delivery.send(s.settings, chunks('ax1 @all MEDIA:/etc/passwd')[0], 'buzz') == 'accepted', delivery._fixture_receipts
+    assert delivery.send(s.settings, chunks('ax1 @all MEDIA:/etc/passwd')[0], 'buzz') == 'handed_to_cron', delivery._fixture_receipts
     assert len(calls) == 1
     assert calls[0]['argv'][1:] == ('messages','send','--channel','synthetic-channel','--content','-')
     assert calls[0]['relay'] == 'wss://synthetic.example.test' and '@all' not in calls[0]['content']
@@ -594,11 +594,13 @@ def test_native_registered_plaintext_lifecycle_and_transient_inspection(route):
     now = int(time.time())
     due, wake = now + 3600, now + 7200
     iso = lambda epoch: datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+    replies = []
     def command(text):
         before = len(calls)
         result = invoke_plugin_command(handler, text, source=create.source)
-        assert 'Reply accepted:' in result, (text, result)
-        assert calls[before:] and all('"error"' not in part for part in calls[before:]), calls[before:]
+        assert result and 'Details:' not in result, (text, result)
+        assert len(calls) == before
+        replies.append(result)
     for text in ('list', 'rules', 'packs', f'inspect {ref} text'):
         command(text)
     command(f'waiting {ref} {iso(due)}')
@@ -617,7 +619,7 @@ def test_native_registered_plaintext_lifecycle_and_transient_inspection(route):
     assert item['classification'] == 'done' and item['reminder_at'] is None and item['snooze_until'] is None
     assert s.store.rows("SELECT state FROM outbox WHERE id=?", (f'reminder:{ref}:queued',))[0]['state'] == 'cancelled'
     assert provider.messages['m1']['unread'] and 'Triaged' in provider.messages['m1']['labels']
-    assert any('PRIVATE-INSPECTION-ONLY' in p for p in calls)
+    assert any('PRIVATE-INSPECTION-ONLY' in p for p in replies)
     assert all('PRIVATE-INSPECTION-ONLY' not in row['text'] for row in s.store.rows('SELECT text FROM outbox'))
     before=len(calls)
     denied=invoke_plugin_command(handler,'list',source=replace_source(create.source,user_id='foreign'))

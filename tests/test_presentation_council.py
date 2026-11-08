@@ -23,8 +23,8 @@ def test_approved_correction_reports_the_rule_actually_saved(env, enabled):
     ack=Chat(lambda:s,lambda _:w).command('correct ax1 '+json.dumps(payload),source=source)
     saved=s.rules(a);assert len(saved)==1 and saved[0]['enabled'] is enabled
     assert s.store.item('ax1')['rule_id']==saved[0]['id']
-    text='\n'.join(x[2] for x in d.sent)
-    assert ack.startswith('Reply accepted:')
+    text=ack
+    assert not d.sent
     assert 'Renewal decisions' in text and ('enabled' if enabled else 'disabled') in text.lower()
     assert 'No reusable rule' not in text and 'item only' not in text and 'Nothing was enabled' not in text
 
@@ -32,13 +32,13 @@ def test_approved_correction_reports_the_rule_actually_saved(env, enabled):
 def test_one_off_correction_stays_one_off_and_invalid_time_has_an_example(env):
     s,w,p,d,a,source=env;p.add('request',body='Please review renewal.');w.tick();d.sent.clear()
     chat=Chat(lambda:s,lambda _:w)
-    chat.command('correct ax1 '+json.dumps({'version':s.store.item('ax1')['version'],'classification':'fyi','always':False}),source=source)
+    result=chat.command('correct ax1 '+json.dumps({'version':s.store.item('ax1')['version'],'classification':'fyi','always':False}),source=source)
     assert not s.rules(a)
-    assert 'No reusable rule' in '\n'.join(x[2] for x in d.sent)
+    assert 'No reusable rule' in result and not d.sent
     before=s.store.item('ax1');d.sent.clear()
     ack=chat.command('snooze ax1 invalid-date',source=source)
-    text='\n'.join(x[2] for x in d.sent)
-    assert ack.startswith('Request not completed.') and s.store.item('ax1')==before
+    text=ack
+    assert 'Check the command' in ack and s.store.item('ax1')==before and not d.sent
     assert re.search(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}.*\+\d{2}:\d{2}',text)
 
 

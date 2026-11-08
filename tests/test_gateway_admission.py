@@ -34,8 +34,17 @@ def register(create,s,delivery,monkeypatch):
     monkeypatch.setattr(product,'service_from_host',lambda ctx:s)
     root=ROOT
     ctx=PluginContext(parse_manifest_file(root/'plugin.yaml',root,'project',''),create.manager)
-    product.register(ctx)
+    s._probe_replies = []
     s._probe_effects = []
+    def post(text):
+        s._probe_replies.append(text)
+        s._probe_effects.append('public-post')
+        return SimpleNamespace(ok=True)
+    # This ingress fixture has no gateway loop. The final call-bound host
+    # collaborator is synthetic here; test_native_multipart exercises the real
+    # public post pipeline separately with the production registration.
+    monkeypatch.setattr(ctx, 'post_message', post)
+    product.register(ctx)
     def provider(account):
         s._probe_effects.append('gmail')
         raise AssertionError('No Gmail use authorised in this ingress test')
@@ -74,13 +83,15 @@ def test_real_event_parser_registered_dispatch_and_foreign_zero_calls(route,monk
     monkeypatch.setattr(aiohttp.ClientSession,'_request',request)
     good=MessageEvent(text='/'+spelling+' consent '+CONSENT,source=create.source)
     handled,result,_=asyncio.run(runner._hm_dispatch_plugin_command(good,good.source,good.get_command()))
-    assert handled and 'Reply accepted:' in result,(handled,result)
+    assert handled and 'Model content sharing updated' in '\n'.join([*s._probe_replies, result]),(handled,result)
+    assert calls == [] and 'native-send' not in s._probe_effects
     assert s.store.meta('model_consent')==CONSENT
     from gateway.session_identity import replace_source
-    before=len(calls);old=s.store.meta('model_consent')
+    before=len(calls);before_replies=len(s._probe_replies);old=s.store.meta('model_consent')
     bad=MessageEvent(text='/'+spelling+' consent off owner=12345',source=replace_source(create.source,user_id='foreign'))
     handled,result,_=asyncio.run(runner._hm_dispatch_plugin_command(bad,bad.source,bad.get_command()))
     assert handled and 'forbidden' in result and len(calls)==before and s.store.meta('model_consent')==old
+    assert len(s._probe_replies)==before_replies, 'Foreign source produced a native post'
     save('dispatcher-'+spelling.replace('@','-'),{'positive':True,'negative':result,'native_calls':calls})
 
 
@@ -150,20 +161,17 @@ def test_bluebubbles_missing_sender_does_not_borrow_chat_identifier(route,monkey
     assert 'Notification-only' in observations[0]['result'][1]
 
 
-@pytest.mark.parametrize('route_state', ['unchanged', 'new-grant-stale-live', 'no-live-adapter', 'change-after-first'])
-def test_ntfy_selected_live_server_at_each_worker_effect(route, monkeypatch, route_state):
+@pytest.mark.parametrize('route_state', ['unchanged', 'regranted', 'host-transport-failure', 'revoked-after-handoff'])
+def test_ntfy_cron_handoff_preserves_grant_and_host_delivery_boundaries(route, monkeypatch, route_state):
     create, calls, _ = route
     s, adapter, module, delivery = create('ntfy', 'synthetic-private', chat_type='topic')
     import httpx, yaml
-    from email_steward.worker import Worker
-    from tools import send_message_tool as host_send
+    from email_steward.cron_delivery import cron_tick, install_schedule
+    from email_steward.errors import Error
+    from cron import scheduler
+    from model_tools import _run_async
+    from gateway.config import Platform
     adapter._http_client = httpx.AsyncClient()
-    native_calls = []
-    original_send = host_send.send_message_tool
-    def send(args):
-        native_calls.append(args)
-        return original_send(args)
-    monkeypatch.setattr(host_send, 'send_message_tool', send)
     def regrant():
         path = s.settings.home / 'config.yaml'
         config = yaml.safe_load(path.read_text())
@@ -171,32 +179,45 @@ def test_ntfy_selected_live_server_at_each_worker_effect(route, monkeypatch, rou
         path.write_text(yaml.safe_dump(config))
         s.settings = replace(s.settings, route_context=json.dumps({'server':'https://selected-new.example.test'}), grant_revision=2)
         s.current_settings()
-    if route_state == 'new-grant-stale-live': regrant()
-    if route_state == 'no-live-adapter': create.transports.pop('ntfy')
     async def handle(self, request):
         calls.append({'url':str(request.url), 'body':request.content.decode()})
-        if route_state == 'change-after-first':
-            regrant()
-            s.store.outbox('fresh-new-grant', 1, 'ax1 new approved server work')
+        if route_state == 'host-transport-failure':
+            return httpx.Response(503, json={'error':'synthetic unavailable'})
         return httpx.Response(200, json={'id':'synthetic-ack'})
     monkeypatch.setattr(httpx.AsyncHTTPTransport, 'handle_async_request', handle)
-    s.store.outbox('work', 1, 'ax1 '+ ('bounded '*250 if route_state == 'change-after-first' else 'private notification'))
+    s.store.outbox('work', 1, 'ax1 private notification')
     try:
-        Worker(s, delivery).flush(2)
-        if route_state == 'change-after-first': Worker(s, delivery).flush(3)
-        rows = s.store.rows('SELECT * FROM outbox ORDER BY rowid')
-        if route_state in {'unchanged', 'change-after-first'}:
-            assert len(calls) == len(native_calls) == 1
-            assert calls[0]['url'] == 'https://synthetic.example.test/synthetic-private'
-            assert rows[0]['state'] == 'uncertain'
-            assert all(row['state'] == 'blocked' for row in rows[1:])
+        if route_state == 'regranted':
+            regrant()
+            with pytest.raises(Error):
+                cron_tick(delivery.ctx, s, delivery.binding['key'], s.settings.home, now=2)
+            binding = install_schedule(delivery.ctx, s, replace_existing=True)
+            assert cron_tick(delivery.ctx, s, binding['key'], s.settings.home, now=3) == ''
+            assert s.store.rows("SELECT state FROM outbox WHERE id='work'") == [{'state':'blocked'}]
+            assert calls == []  # Historical grant never reroutes to the new server.
+            return
+        output = cron_tick(delivery.ctx, s, delivery.binding['key'], s.settings.home, now=2)
+        assert 'ax1 private notification' in output
+        if route_state == 'revoked-after-handoff':
+            # Once stdout is handed to the host, the plugin cannot recall it.
+            # A later run must still deny access under the revoked binding.
+            regrant()
+            with pytest.raises(Error):
+                cron_tick(delivery.ctx, s, delivery.binding['key'], s.settings.home, now=3)
+            assert calls == []
         else:
-            assert calls == native_calls == []
-            assert rows[0]['state'] == 'blocked'
-        if route_state == 'new-grant-stale-live':
-            assert rows[0]['grant_generation'] == s.store.active_grant[0] == 2
-            assert rows[0]['grant_fingerprint'] == s.store.active_grant[1]
-        save('ntfy-'+route_state, {'calls':calls, 'native_calls':native_calls, 'rows':rows, 'active_grant':s.store.active_grant})
+            async def current_loop(): return asyncio.get_running_loop()
+            adapters = {Platform('ntfy'):adapter}
+            job = {'id':delivery.binding['job_id'], 'deliver':delivery.binding['deliver'], 'attach_to_session':False}
+            error = scheduler._deliver_result(job, output, adapters=adapters, loop=_run_async(current_loop()))
+            if route_state == 'host-transport-failure':
+                assert error and calls and all(c['url'] == 'https://synthetic.example.test/synthetic-private' for c in calls)
+            else:
+                assert error is None and len(calls) == 1
+                assert calls[0]['url'] == 'https://synthetic.example.test/synthetic-private'
+                assert output in calls[0]['body']
+        assert s.store.rows("SELECT state FROM outbox WHERE id='work'") == [{'state':'handed_to_cron'}]
+        assert not s.store.rows("SELECT id FROM outbox WHERE state IN ('sent','accepted')")
     finally:
         asyncio.run(adapter._http_client.aclose())
         adapter._http_client = None

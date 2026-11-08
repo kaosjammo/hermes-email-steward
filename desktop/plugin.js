@@ -24,7 +24,7 @@ const css = `
 .es-rules .es-form>fieldset>.es-preview-panel{grid-column:2;grid-row:1;border-top:0;border-left:1px solid var(--ui-stroke-tertiary);padding:0 0 0 28px}
 .es-rules .es-preview-panel .es-grid{grid-template-columns:1fr;gap:12px}
 .es-rules .es-footer{grid-column:1/-1}
-.es-rules .es-footer>.es-error{flex-basis:100%;margin:0}.es-rules .es-footer{padding:14px 0;position:sticky;bottom:0;background:var(--ui-surface-background);z-index:1}.es-rules .es-form legend{margin-bottom:6px}.es-rules .es-advanced{align-self:center}.es-rules summary{cursor:pointer;color:var(--ui-text-secondary);font-size:12px;padding:6px 0}.es-rules .es-advanced[open]{grid-column:1/-1}.es-rules .es-advanced .es-field{max-width:260px}
+.es-rules .es-footer>.es-error{flex-basis:100%;margin:0}.es-rules .es-footer{padding:14px 0;position:static}.es-rules .es-form legend{margin-bottom:6px}.es-rules .es-advanced{align-self:center}.es-rules summary{cursor:pointer;color:var(--ui-text-secondary);font-size:12px;padding:6px 0}.es-rules .es-advanced[open]{grid-column:1/-1}.es-rules .es-advanced .es-field{max-width:260px}
 .es-rules .es-select{font:inherit;min-height:34px;white-space:normal;text-align:left}
 .es-rules input{min-height:34px}.es-rules .es-condition{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .es-rules .es-condition .es-field:nth-child(3){grid-column:1/-1}.es-rules .es-condition>button{justify-self:start}.es-rules .es-preview-panel>.es-field{margin:12px 0}.es-rules .es-preview-panel .es-grid{margin-top:12px}

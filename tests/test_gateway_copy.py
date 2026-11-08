@@ -14,13 +14,13 @@ def test_native_reply_has_useful_after_state_without_internal_record(env):
     c=Chat(lambda:s,lambda _:w)
     due=datetime.fromtimestamp(time.time()+3600,timezone.utc).isoformat()
     result=c.command('remind ax1 '+due,source=source)
-    output='\n'.join(x[2] for x in d.sent)
-    assert 'Reply accepted:' in result
+    output=result
+    assert not d.sent  # Core delivers returned command text; no background plugin send.
     assert 'Reminder set' in output and 'ax1' in output
     assert 'mailbox_id' not in output and '｛' not in output and 'rule_id' not in output
     assert s.store.item('ax1')['reminder_at'] is not None
-    d.sent.clear();c.command('done ax1',source=source)
-    output='\n'.join(x[2] for x in d.sent)
+    d.sent.clear();output=c.command('done ax1',source=source)
+    assert not d.sent
     assert 'Done' in output and 'archived' in output and 'cancelled' in output
     assert s.store.item('ax1')['classification']=='done'
     assert s.store.item('ax1')['reminder_at'] is None

@@ -2,7 +2,7 @@
 
 Private Gmail triage for one owner, across up to four separately authorised Gmail accounts in one Hermes profile. A selected qualified native gateway controls obligations and rules; the native Hermes Desktop screen edits the same rule store. Suggested starter packs remain off until explicitly installed.
 
-**Work in progress, not recommended for live mail.** This public snapshot preserves the parked Email Steward implementation and unfinished presentation changes for a draft Hermes plugin-catalog contribution. The prior UI did not achieve its design approval target; the latest presentation changes have no fresh independent approval. Internal conversations, machine-specific build records and private orchestration history are excluded. Publication is not a hackathon submission, release, deployment or claim of live acceptance. No Gmail send, reply draft, delete or unsubscribe action is implemented. Real Gmail/OAuth, live gateway delivery, native Electron, mobile and hosted CI acceptance remain unverified.
+**Public-API release candidate.** Issue [#2](https://github.com/kaosjammo/hermes-email-steward/issues/2) tracks the usable public-API repair. Scheduled output now uses supported Hermes cron `deliver`; it is not indefinitely disabled. Qualification includes isolated released-host cron wiring; exact-candidate review and publication results are recorded on that issue. No Gmail send, reply draft, delete or unsubscribe action is implemented. Live Gmail/OAuth, real platform delivery, native Electron and mobile acceptance remain unverified.
 
 ## Fresh checkout and local checks
 
@@ -17,7 +17,7 @@ scripts/package.sh
 
 `setup.sh` creates `.local/backend/venv` and installs **tracked `requirements.lock`**, including build/test dependencies. It does not depend on a pre-existing task venv or alter Hermes' environment. All scratch, dependency cache and subprocess TMPDIR remain inside repository `.local/`. `ES_BOOTSTRAP_PYTHON` selects the initial interpreter. `ES_VENV_NAME=fresh-venv scripts/setup.sh` verifies installation into a second clean task venv. `ES_PYTHON=/absolute/path/to/prepared/python scripts/test.sh` selects a prepared interpreter; the default is the task venv. A missing interpreter produces an actionable setup error.
 
-The native check copies the plugin into an isolated `.local/backend/native/home/plugins/email-steward`, sets isolated `HERMES_HOME`/`HERMES_RUNTIME_DIR`, and invokes the actual upstream validator and discovery from a different working directory. It never installs into the running Hermes profile. Tested reference: `b63eb8bf5a7a09e33b6d63077ec4e7df7361780b`. The expanded native suite requires that pinned SDK; the native validation command must still be run for qualification. The GitHub workflow pins this reference and runs only this package's tests/build.
+The native check copies the plugin into an isolated `.local/backend/native/home/plugins/email-steward`, sets isolated `HERMES_HOME`/`HERMES_RUNTIME_DIR`, and invokes the actual upstream validator and discovery from a different working directory. It never installs into the running Hermes profile. Current release qualification targets **Hermes v0.23.0**, commit `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`; the manifest requires `>=0.23.0`. The expanded native suite requires that released host; the native validation command must still be run for qualification. The GitHub workflow pins the same release; hosted CI is a separate acceptance gate.
 
 `package.sh` builds a native plugin directory bundle, Python wheel and source distribution under `.local/backend/dist`. Build staging is `.local/backend/package-src`; it excludes `.local`, credentials, Git internals and dependency installations. The wheel supplies the Python library. Use the native directory bundle/source repository for the plugin's manifest, backend and Desktop assets together.
 
@@ -37,15 +37,26 @@ This loopback-only fixture serves the real REST router at `/api/plugins/email-st
 
 These are user-operated production setup instructions, **not actions executed by this build**. Install the native plugin directory using Hermes' plugin installation/enable workflow. Let Hermes PM admit the declared `fastapi>=0.133.1,<0.134` dependency; never use this development setup script to mutate a Hermes-managed environment. Include `plugin.yaml`, root `__init__.py`, `email_steward/`, `dashboard/` and `desktop/` together. Restart/reload the host as its plugin UI instructs.
 
-Configure the owning profile, using its selected private Discord DM or an owner-controlled restricted channel:
+The released host must load this trusted plugin in its owning profile process
+so its CLI and typed Desktop identity are available. In that profile's
+`config.yaml`, explicitly select `plugins.isolation: in_process` and include
+`email-steward` in `plugins.enabled`; preserve other plugin settings. Hosted or
+secondary-process mode cannot provide those contracts and fails closed.
+
+Use an explicit profile selector for every setup, auth and scheduling command.
+Replace `PROFILE` with its registered name, or `default` for the default/custom
+root. For a custom root, launch with its own `HERMES_HOME` as well. Configure its
+selected private Discord DM or owner-controlled restricted channel:
 
 ```bash
-hermes email-steward setup --platform discord --owner DISCORD_USER_ID --destination PRIVATE_CHAT_ID --type dm --account PROFILE:discord --transport-profile PROFILE --transport-home /absolute/owning/profile/home --confirm-private --desktop-subject uid:LOCAL_UID
+hermes -p PROFILE email-steward setup --platform discord --owner DISCORD_USER_ID --destination PRIVATE_CHAT_ID --type dm --account PROFILE:discord --transport-profile PROFILE --transport-home /absolute/owning/profile/home --confirm-private --desktop-subject uid:LOCAL_UID
 ```
 
 For a restricted channel, use `--type channel` only after confirming its access controls. A channel name or loopback address alone never grants access. Desktop's normal local POSIX native bootstrap uses the exact `uid:<numeric uid>` subject; enter the actual local uid. Federated/native subjects can differ. [Security and supported host identities](docs/SECURITY.md) gives exact alternatives and fail-closed behaviour. Configure plugin settings under `plugins.entries.email-steward.settings`, with the schema declared in `plugin.yaml`.
 
-Background polling is off until the owner finishes setup. Enable `worker_enabled: true` in this profile's plugin settings, then reload the plugin. Alternatively run `hermes email-steward worker` as a foreground profile-bound service, or `hermes email-steward poll-once` for one cycle. The default interval is 60 seconds; configurable range is 15–240 seconds. The worker always rebinds its captured profile and rereads that profile's current owner/private grant. Separate processes and actions share a file lock. An explicit local operator regrant may change the owner within this profile while retaining business state; this is a sensitive administrative transfer. Old queued authority and consent are revoked. Changing profile home is refused.
+After owner setup and mailbox connection, explicitly run `hermes -p PROFILE email-steward schedule-install` and check `hermes -p PROFILE cron status`. The owning scheduler must be running. [Scheduled delivery and recovery](docs/CRON.md) explains the generated script, exact private target, in-process owner-profile topology, configuration changes and uncertain outcomes. The one-minute cron job runs actual triage/brief/reminder production logic and Hermes delivers its stdout. Discovery does not activate it.
+
+Optional `worker_enabled: true`, foreground `worker` and `poll-once` perform intake and queue output; they do not send independently. Threads capture the owning host context and reread current settings without private gateway scopes. Separate processes and actions share a file lock. Explicit local owner regrant revokes old queued authority/consent while retaining business state; changing profile home is refused.
 
 ## Gmail OAuth: separate account grants
 
@@ -54,16 +65,16 @@ Create your own Google Cloud OAuth **Desktop app** client with Gmail API enabled
 There are four declared independent grant IDs. Sign in once per connected mailbox, selecting the intended Google account in each host-owned flow:
 
 ```bash
-hermes auth add email-steward:gmail-1
-hermes email-steward connect gmail-1 alex@example.test --name Personal
-hermes auth add email-steward:gmail-2
-hermes email-steward connect gmail-2 work@example.test --name Work
-hermes email-steward status
+hermes -p PROFILE auth add email-steward:gmail-1
+hermes -p PROFILE email-steward connect gmail-1 alex@example.test --name Personal
+hermes -p PROFILE auth add email-steward:gmail-2
+hermes -p PROFILE email-steward connect gmail-2 work@example.test --name Work
+hermes -p PROFILE email-steward status
 ```
 
 The example addresses are synthetic; replace them with your own during authorised setup. The supported capacity is **FOUR separately declared account OAuth slots: `gmail-1`…`gmail-4`**. Slots 3 and 4 work identically. Extending capacity requires additional manifest OAuth grant declarations, matching code/CLI slot allowlists, explicit new host-owned grants, and renewed plugin validation/account-isolation tests; account verification remains mandatory. There is no dynamic/unlimited grant or alternate auth system. Each request names its specific slot through `credentialed_provider_request`; its declared API host is only `gmail.googleapis.com`. `/users/{expected-address}/profile` must match the expected address at connect, every poll and each provider selection for item reads/mutations, Every resource URL also names the expected receiving address instead of users/me. Gmail then enforces account access on each request, so a slot change between the profile check and a read/effect is denied without reading or mutating the foreign mailbox. Distinct grants do not imply that choosing the same account twice creates a new mailbox. Duplicate addresses/slots are refused.
 
-The declared `gmail.modify` scope permits label and Inbox location changes. Implementation calls only profile/history/message/thread/label reads, Triaged label creation, and label add/remove; it never changes `UNREAD` or calls Gmail send/draft/delete/trash endpoints. Sign-in and refresh remain host-owned. Use `hermes auth status|refresh|logout email-steward:gmail-1` for the matching grant. No flow is launched by an unattended worker.
+The declared `gmail.modify` scope permits label and Inbox location changes. Implementation calls only profile/history/message/thread/label reads, Triaged label creation, and label add/remove; it never changes `UNREAD` or calls Gmail send/draft/delete/trash endpoints. Sign-in and refresh remain host-owned. Use `hermes -p PROFILE auth status|refresh|logout email-steward:gmail-1` for the matching grant. No flow is launched by an unattended worker.
 
 Connecting records the current Gmail history ID: older Inbox mail is excluded. An explicit bounded `historical` command can queue a date range of at most 31 days and 500 messages. History expiry or overflow pauses intake visibly and retains the checkpoint; it never silently skips forward. Use `recover-history MAILBOX AFTER_ISO LIMIT` to explicitly recover the bounded recent Inbox range and cut over to the current history head. The start must be within 31 days and the limit 1–500; an oversized scope fails without advancing anything. First use separate `historical` ranges if older mail also needs recovery. The recovery response states its cutover and exclusions. No automatic reset or inferred approval occurs.
 
@@ -113,13 +124,13 @@ The operational target is detection, assessment and private delivery within five
 
 Permanent refs use first+last alphabetic local-part letters after Unicode NFKC+casefold, followed by a profile-global SQLite AUTOINCREMENT sequence. One letter repeats (`a` → `aa`); no letters uses `xx`. Account/thread uniqueness and the sequence handle prefix collisions. References survive category, archive and display-name changes and restart. Preserve the state database and its sequence when backing up/migrating. Digest aliases are immutable: `D<digest-id>:A1` resolves the original thread; an unqualified alias occurring in multiple digests is refused. Gmail links use the receiving account's encoded `authuser` address and thread id. Real multi-login browser targeting and native mobile-app opening still require live verification.
 
-Outbox rows persist before sending. A confirmed host success is retained as sent. A known pre-send synthetic retry uses bounded backoff. The host's send surface has no provider idempotency key/receipt reconciliation, so exceptions, partial results or a crash after send intent become **uncertain**, not silently resent. Inspect `/email-steward outbox`; after checking the private destination, use `delivery-confirm ID` if already delivered, or `delivery-retry ID` to explicitly accept duplicate risk. Pending/uncertain outcomes prevent an all-clear. This is honest crash recovery, not exactly-once delivery across a network failure.
+Outbox rows persist before stdout handoff. `handed_to_cron` and returned command text are not provider receipts. Observed delivery errors leave handoffs uncertain; a crash after durable handoff intent is not blindly retried. Latest job status is diagnostic, not an exact payload receipt. Inspect `/email-steward outbox` and the owning profile's cron history; `delivery-confirm ID` records explicit owner confirmation, while `delivery-retry ID` accepts duplicate risk under a still-current grant. Outstanding obligations survive output failures. See [cron semantics and limits](docs/CRON.md).
 
 ## Privacy and limits
 
-Only provider IDs, permanent refs, summaries/reasons, rules, lifecycle state, checkpoints, aliases and delivery history persist. SQLite/state directories are owner-only (0700/0600); state is bound to its profile home and configured owner. Full bodies and attachment bytes/text are fetched transiently with explicit private profile scratch for parsers. No permanent mailbox replica is built.
+Provider IDs, permanent refs, summaries/reasons, rules, lifecycle state, checkpoints, aliases and delivery history persist. Hermes also retains scheduled output/history under the owning profile. SQLite/state directories are owner-only (0700/0600); state is bound to its profile home and configured owner. Full bodies and attachment bytes/text are fetched transiently with explicit private profile scratch for parsers. No permanent mailbox replica is built.
 
-Untrusted output is bounded, HTML/Markdown escaped, mentions disabled, authentication/credential-like content redacted, external/tracking links removed and Hermes media/file directives neutralised. Only generated account-specific Gmail links are added. Redaction and danger scanning are conservative and cannot guarantee detection of every secret or malicious format. A suspected dangerous attachment stops the batch and attempts an immediate private warning; unreadable/unsupported/truncated content holds automatic archive. Human-requested `done`/`archive` remains an explicit owner location choice.
+Untrusted output is bounded, HTML/Markdown escaped, mentions disabled, authentication/credential-like content redacted, external/tracking links removed and Hermes media/file directives neutralised. Only generated account-specific Gmail links are added. Redaction and danger scanning are conservative and cannot guarantee detection of every secret or malicious format. A suspected dangerous attachment stops the attachment batch and queues a priority private warning for the cron route; unreadable/unsupported/truncated content holds automatic archive. Human-requested `done`/`archive` remains an explicit owner location choice.
 
 See [security boundaries](docs/SECURITY.md), [backend implementation/evidence](docs/BACKEND.md), [R01–R10 acceptance map](docs/ACCEPTANCE.md), and [parser limits](docs/EXTRACTION.md). Independent exact-candidate review, real OAuth/account isolation, real private delivery, actual Desktop host and mobile/browser acceptance remain separate gates owned by the integrator/user.
 
@@ -129,32 +140,24 @@ Automatic FYI archive applies only to the assessed message. It cannot remove Inb
 
 Rule-matched and consent-off messages use a bounded redacted extractive summary of the available request/substance and quote explicit deadline text. No calendar date, reminder interval or model call is inferred. Matched rules keep classification authority; raw bodies and full extracts remain transient. Model-enabled unknown items require renewed routing disclosure consent.
 
-## Repair 4 native limitations
+## Native route limits
 
-Photon/BlueBubbles notifications remain supported with explicit public account/server grants, but native interactive commands are denied: the host bridge cannot prove the actor was not a conversation fallback. ntfy notifications require the live server to match both current grant and host config; absent/stale adapter is held before sending. [Current capability matrix](docs/NATIVE-GATEWAYS.md) and [review contributions](https://github.com/kaosjammo/hermes-email-steward/issues/1) record the narrowed management scope, unchanged live gates and accepted ledger.
+Photon/BlueBubbles commands remain denied because the native bridge cannot prove a genuine actor rather than a conversation fallback. Notifications use the owner-created cron route. The old private adapter sender and its adapter-internals preflights have been removed; old direct-sender evidence does not qualify cron delivery. [Native route policy](docs/NATIVE-GATEWAYS.md) and [current qualification](https://github.com/kaosjammo/hermes-email-steward/issues/2) retain that distinction.
 
 ## Native presentation (ES-004)
 
 The opt-in **Email rules** screen uses Hermes SDK controls, typography and theme colours. Rule conditions and a real match preview sit side by side on wide screens and stack on narrow ones. Rule order is available under an expandable control. A preview is required after each edit. Failed or conflicting saves require a server reload before another save; packs and one-off corrections keep their separate approvals. The screen still calls the same protected REST service and SQLite store as native commands.
 
-Native command replies are plain-language summaries, after-state confirmations and explicit failure/uncertainty notices; machine tool and REST schemas are unchanged. Briefs and urgent alerts retain the permanent reference, substantive request, explicit deadline, warning and safe Gmail link. Long output splits at complete lines or words where possible, with bounded numbered parts. Credential-like values, unsafe links, mentions and transport directives remain neutralised; attachment/body inspection is transient. Gateway restrictions and provider-acceptance limits in [NATIVE-GATEWAYS.md](docs/NATIVE-GATEWAYS.md) still apply.
+Native commands return short replies directly and hand long replies to public call-bound `ctx.post_message` one bounded part at a time, with fresh grant checks. They stop on an unconfirmed part and report duplicate risk; full inspection output is not cached. Replies are plain-language summaries, after-state confirmations and explicit failure/uncertainty notices; machine tool and REST schemas are unchanged. Briefs and urgent alerts retain the permanent reference, substantive request, explicit deadline, warning and safe Gmail link. Long output splits at complete lines or words where possible, with bounded numbered parts. Credential-like values, unsafe links, mentions and transport directives remain neutralised; attachment/body inspection is transient. Gateway restrictions and provider-acceptance limits in [NATIVE-GATEWAYS.md](docs/NATIVE-GATEWAYS.md) still apply.
 
-[Publication status and unresolved acceptance](https://github.com/kaosjammo/hermes-email-steward/issues/1) track this parked draft. A prior UI snapshot received CHANGES REQUESTED from all three design reviewers; later changes remain unapproved. Browser-hosted Desktop evidence is distinct from native Electron and live gateway/mobile acceptance.
+[Release-readiness acceptance](https://github.com/kaosjammo/hermes-email-steward/issues/2) tracks the current candidate. Earlier UI scores and approvals do not establish current rendered usability. Browser-hosted Desktop evidence is distinct from native Electron and live gateway/mobile acceptance.
 
 
 ## Installation risk disclosure
 
-This draft can read mail and attachments from explicitly authorised Gmail accounts, call Google Gmail APIs, transmit bounded redacted email content to the configured Hermes model after consent, and send private notifications through the configured Hermes gateway. The Gmail modify scope permits label/Inbox changes. A profile-bound background poller runs only after explicit setup/enabling. Attachment extraction invokes bounded local parser/OCR subprocesses and uses private scratch; durable local SQLite state contains sensitive summaries, rules and delivery history. OAuth tokens and refresh remain host-owned; the plugin does not read credential stores. No telemetry or automatic self-update is implemented. Some native adapter integrations import undocumented Hermes modules; compatibility and scanner warnings need maintainer review. The synthetic test host is not a production authentication server.
+This draft can read mail and attachments from explicitly authorised Gmail accounts, call Google Gmail APIs, transmit bounded redacted email content to the configured Hermes model after consent, and hand bounded private notifications to the owner-configured Hermes cron delivery route. The Gmail modify scope permits label/Inbox changes. A profile-bound background poller runs only after explicit setup/enabling. Attachment extraction invokes bounded local parser/OCR subprocesses and uses private scratch; durable local SQLite state contains sensitive summaries, rules and delivery history. OAuth tokens and refresh remain host-owned; the plugin does not read credential stores. No telemetry or automatic self-update is implemented. Some native adapter integrations import undocumented Hermes modules; compatibility and scanner warnings need maintainer review. The synthetic test host is not a production authentication server.
 
-The tested development SDK is commit `b63eb8bf5a7a09e33b6d63077ec4e7df7361780b`, not proof of compatibility with every released Hermes version. A release compatibility floor and current catalog validation remain admission gates; no speculative minimum version is declared.
-
-
-## Draft publication checks
-
-The privacy-filtered public snapshot passed the real pinned-SDK plugin validation/discovery path: manifest, declared capabilities, security scanner, Desktop SDK surface and no-core-override checks passed. Validation emitted warnings for private/undocumented core imports, which remain unresolved compatibility risks. Four declared host-owned Gmail OAuth slots, native command/CLI registration and the REST router were discovered in isolated synthetic state; no live account was connected.
-
-The current aggregate Python test attempt **timed out after 240 seconds**, with failures and skips visible before termination; it is not a pass. The packaging command also failed: the prepared environment has setuptools83.0.0, outside the declared build range `>=80.9,<81`. Neither the declared build requirement nor failing assertions were weakened for publication. These unresolved results, unfinished UI approval and absent live acceptance make this a draft, not an install/release recommendation. Internal build history and original local source remain preserved separately; this public repository intentionally starts from a privacy-filtered snapshot.
-
+The release compatibility target is Hermes v0.23.0 on Linux/Python 3.14, in the supported owner-profile topology described in [CRON.md](docs/CRON.md). Isolated installed-host synthetic wiring, package builds and focused checks have run. Independent release verdicts and exact published CI results are tracked separately on source issue #2. Historical development-SDK tests, failed builds and the original parked publication remain historical; current source issue #2 records the actual remaining gates.
 
 ### Publication privacy correction
 

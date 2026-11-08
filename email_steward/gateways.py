@@ -19,7 +19,8 @@ class Capability:
     reason: str = "Explicit private grant and native activation required"
 
 
-# Canonical core + bundled platforms at Hermes b63eb8bf. Not a plugin discovery allow-all.
+# Explicit core/bundled policy, requalified against Hermes v0.23.0.
+# This is not a plugin discovery allow-all.
 CAPABILITIES = {
     **{p: Capability("internal", reason="Internal ingress/session surface; no private notification route")
        for p in ("a2a", "api_server", "local", "msgraph_webhook", "raft", "webhook")},
@@ -117,45 +118,20 @@ def context(settings):
     return value
 
 
-def route_context_matches(settings, config, adapter):
-    """Compare supported actual host public fields at admission/effect; never infer an account."""
+def route_context_matches(settings, config, adapter=None):
+    """Check the receiving route's public configuration; never inspect adapter internals."""
     expected = context(settings)
-    if not expected:
-        return True
     extra = config.extra
-    values = {k: str(extra.get(k, "")) for k in expected}
-    attrs = {
-        "ntfy": {"server": "_server"},
-        "signal": {"account": "account", "http_url": "http_url"},
-        "bluebubbles": {"server_url": "server_url"}, "weixin": {"account_id": "_account_id", "base_url": "_base_url"},
-        "teams": {"client_id": "_client_id"}, "photon": {"project_id": "_project_id"},
-        "whatsapp": {"bridge_port": "_bridge_port"},
-        "wecom": {"bot_id": "_bot_id", "websocket_url": "_ws_url"},
-        "whatsapp_cloud": {"phone_number_id": "_phone_number_id"},
-        "yuanbao": {"app_id": "_app_key"}, "buzz": {"cli_path": "cli_path", "relay_url": "relay_url"},
-        "matrix": {"homeserver": "_homeserver", "user_id": "_user_id"},
-    }
-    if settings.platform in attrs:
-        if adapter is None:
-            return False
-        values = {key: str(getattr(adapter, attr, "")) for key, attr in attrs[settings.platform].items()}
-        if any(str(extra.get(key, "")) != value for key, value in expected.items()):
-            return False
-    if settings.platform == "sms":
-        from agent.secret_scope import get_secret
-        values = {"account_sid": get_secret("TWILIO_ACCOUNT_SID", ""), "from_number": get_secret("TWILIO_PHONE_NUMBER", "")}
     if settings.platform == "wecom_callback":
-        apps = getattr(adapter, "_apps", ()) if adapter is not None else ()
-        if len(apps) != 1:
+        # The public configuration must name exactly one callback application.
+        # A multi-app adapter's internal fallback order is not a plugin contract.
+        if "apps" not in extra:
+            return all(str(extra.get(key, "")) == value for key, value in expected.items())
+        apps = extra["apps"]
+        if not isinstance(apps, list) or len(apps) != 1 or not isinstance(apps[0], dict):
             return False
-        values = {key: str(apps[0].get(key, "")) for key in expected}
-        if values != expected:
-            return False
-        # Re-evaluate the fresh config too; the default sender must never choose a
-        # first/legacy app from a different configuration than the receiving adapter.
-        configured = adapter._normalize_apps(extra)
-        return len(configured) == 1 and all(str(configured[0].get(k, "")) == v for k, v in expected.items())
-    return values == expected
+        return all(str(apps[0].get(key, "")) == value for key, value in expected.items())
+    return all(str(extra.get(key, "")) == value for key, value in expected.items())
 
 
 def capability(platform):
@@ -257,8 +233,7 @@ def native_access(settings, source):
             or identity.runtime_home.resolve() != settings.home or identity.runtime_profile != settings.profile
             or identity.authorization_home.resolve() != Path(settings.transport_home or settings.home).resolve()
             or identity.transport_profile != (settings.transport_profile or settings.profile)
-            or getattr(getattr(adapter, "platform", None), "value", None) != settings.platform
-            or (getattr(adapter, "_owner_profile", None) or settings.profile) != settings.profile):
+            or getattr(getattr(adapter, "platform", None), "value", None) != settings.platform):
         raise Error("forbidden", "Use the selected platform-qualified owner's exact private native source and receiving profile.", 403)
     if settings.grant_revision and not route_context_matches(settings, adapter.config, adapter):
         raise Error("account_mismatch", "The native receiving transport's public account/server context changed.", 403)
